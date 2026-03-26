@@ -15,8 +15,17 @@ export default function NowPlaying() {
   const [reportPulse, setReportPulse] = useState(false);
   const [lovePulse, setLovePulse] = useState(false);
   const [online, setOnline] = useState(true);
+  const [showLogout, setShowLogout] = useState(false);
   const clientName = localStorage.getItem('client_name') || '';
   const storeName = localStorage.getItem('store_name') || '';
+
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem('device_token');
+    localStorage.removeItem('store_id');
+    localStorage.removeItem('store_name');
+    localStorage.removeItem('client_name');
+    window.location.href = '/setup';
+  }, []);
 
   useEffect(() => { loadPlaylist(); }, [loadPlaylist]);
 
@@ -63,7 +72,29 @@ export default function NowPlaying() {
 
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px' }}>
-          <img src="/logo.png" alt="Entuned" style={{ height: 20, opacity: 1 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <img
+              src="/logo.png" alt="Entuned"
+              style={{ height: 20, opacity: 1, cursor: 'pointer' }}
+              onClick={() => setShowLogout(v => !v)}
+            />
+            {showLogout && (
+              <button
+                type="button"
+                onClick={handleLogout}
+                style={{
+                  fontSize: 10, fontWeight: 300, letterSpacing: 1,
+                  color: 'rgba(240,153,123,0.5)', background: 'none', border: '1px solid rgba(240,153,123,0.2)',
+                  borderRadius: 12, padding: '4px 12px', cursor: 'pointer',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = 'rgba(240,153,123,0.8)'; e.currentTarget.style.borderColor = 'rgba(240,153,123,0.4)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(240,153,123,0.5)'; e.currentTarget.style.borderColor = 'rgba(240,153,123,0.2)'; }}
+              >
+                DISCONNECT
+              </button>
+            )}
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 20, fontWeight: 200, color: 'rgba(255,255,255,0.11)', letterSpacing: 0.5, textTransform: 'uppercase' }}>
               {clientName}{clientName && storeName ? ' — ' : ''}{storeName}
