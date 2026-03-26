@@ -114,14 +114,19 @@ export function usePlayer() {
     el.src = song.audio_url;
     el.volume = 1;
     el.load();
+    let playing = false;
     try {
       await el.play();
+      playing = true;
     } catch (err) {
-      console.error('Playback failed:', err);
+      console.error('Autoplay blocked — waiting for user interaction:', err);
+      playing = false;
     }
-    setPlayState({ currentSong: song, isPlaying: true, progress: 0, elapsed: 0 });
-    startProgress();
-    await logPlayStart(song.id);
+    setPlayState({ currentSong: song, isPlaying: playing, progress: 0, elapsed: 0 });
+    if (playing) {
+      startProgress();
+      await logPlayStart(song.id);
+    }
   }, []);
 
   // Crossfade to next song
@@ -175,11 +180,16 @@ export function usePlayer() {
   // Toggle play/pause
   const togglePlayPause = useCallback(() => {
     const el = getActive();
-    if (!el) return;
+    if (!el || !el.src) return;
     if (el.paused) {
-      el.play();
-      setPlayState((p) => ({ ...p, isPlaying: true }));
-      startProgress();
+      el.play().then(() => {
+        setPlayState((p) => ({ ...p, isPlaying: true }));
+        startProgress();
+        // Log play start if this is first interaction after autoplay block
+        if (!currentEventId.current && playState.currentSong) {
+          logPlayStart(playState.currentSong.id);
+        }
+      }).catch(() => {});
     } else {
       el.pause();
       setPlayState((p) => ({ ...p, isPlaying: false }));
