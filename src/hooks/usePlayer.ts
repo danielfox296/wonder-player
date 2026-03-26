@@ -147,6 +147,12 @@ export function usePlayer() {
 
     try { await fadeIn.play(); } catch { /* ignore */ }
 
+    // Swap active ref NOW so progress tracks the new song
+    activeRef.current = activeRef.current === 'A' ? 'B' : 'A';
+    setPlayState({ currentSong: nextSong, isPlaying: true, progress: 0, elapsed: 0 });
+    startProgress();
+    await logPlayStart(nextSong.id);
+
     // 3-second crossfade
     const steps = 30; // 30 steps over 3s = 100ms per step
     let step = 0;
@@ -161,14 +167,9 @@ export function usePlayer() {
         fadeTimer.current = null;
         fadeOut.pause();
         fadeOut.src = '';
-        activeRef.current = activeRef.current === 'A' ? 'B' : 'A';
         crossfading.current = false;
       }
     }, 100);
-
-    setPlayState({ currentSong: nextSong, isPlaying: true, progress: 0, elapsed: 0 });
-    startProgress();
-    await logPlayStart(nextSong.id);
   }, [queue, songs]);
 
   // Toggle play/pause
