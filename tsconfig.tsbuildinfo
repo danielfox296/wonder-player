@@ -1,0 +1,1 @@
+{"root":["./src/main.tsx","./src/components/flagmodal.tsx","./src/components/visualization.tsx","./src/hooks/useplayer.ts","./src/lib/api.ts","./src/screens/nowplaying.tsx","./src/screens/setup.tsx"],"version":"5.9.3"}
