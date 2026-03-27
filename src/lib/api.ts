@@ -28,6 +28,10 @@ export async function playerApi<T = unknown>(path: string, options: { method?: s
   return data;
 }
 
+export async function sendFeedback(song_id: string, type: 'love' | 'report', reason?: string) {
+  return playerApi('/api/player/feedback', { method: 'POST', body: { song_id, type, reason } });
+}
+
 export async function setupDevice(email: string, password: string) {
   const res = await fetch(`${API}/api/player/auth/setup`, {
     method: 'POST',

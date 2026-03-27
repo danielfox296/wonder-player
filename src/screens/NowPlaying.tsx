@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { usePlayer } from '../hooks/usePlayer.js';
 import Visualization from '../components/Visualization.js';
 import FlagModal from '../components/FlagModal.js';
+import { sendFeedback } from '../lib/api.js';
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -46,13 +47,22 @@ export default function NowPlaying() {
   }, []);
 
   const handleReport = useCallback(() => { setShowFlag(true); }, []);
-  const handleFlagDone = useCallback(() => { setShowFlag(false); skip(); }, [skip]);
+  const handleFlagDone = useCallback((reason: string) => {
+    setShowFlag(false);
+    if (playState.currentSong) {
+      sendFeedback(playState.currentSong.id, 'report', reason).catch(() => {});
+    }
+    skip();
+  }, [skip, playState.currentSong]);
   const handleFlagClose = useCallback(() => { setShowFlag(false); }, []);
 
   const handleLove = useCallback(() => {
     setLovePulse(true);
     setTimeout(() => setLovePulse(false), 1000);
-  }, []);
+    if (playState.currentSong) {
+      sendFeedback(playState.currentSong.id, 'love').catch(() => {});
+    }
+  }, [playState.currentSong]);
 
   const handleReportClick = useCallback(() => {
     setReportPulse(true);
