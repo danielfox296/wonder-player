@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { usePlayer } from '../hooks/usePlayer.js';
 import Visualization from '../components/Visualization.js';
 import FlagModal from '../components/FlagModal.js';
@@ -11,7 +11,7 @@ function formatTime(sec: number): string {
 }
 
 export default function NowPlaying() {
-  const { playState, loaded, loadPlaylist, togglePlayPause, skip, songs } = usePlayer();
+  const { currentSong, isPlaying, loaded, loadPlaylist, togglePlayPause, skip, songs, getAudioInfo } = usePlayer();
   const [showFlag, setShowFlag] = useState(false);
   const [reportPulse, setReportPulse] = useState(false);
   const [lovePulse, setLovePulse] = useState(false);
@@ -19,6 +19,30 @@ export default function NowPlaying() {
   const [showLogout, setShowLogout] = useState(false);
   const clientName = localStorage.getItem('client_name') || '';
   const storeName = localStorage.getItem('store_name') || '';
+
+  // DOM refs for progress — updated directly from rAF, no React re-renders
+  const fillRef = useRef<HTMLDivElement>(null);
+  const knobRef = useRef<HTMLDivElement>(null);
+  const elapsedRef = useRef<HTMLSpanElement>(null);
+  const durationRef = useRef<HTMLSpanElement>(null);
+
+  // rAF loop: writes directly to DOM, bypasses React reconciliation entirely
+  useEffect(() => {
+    let rafId: number;
+    const tick = () => {
+      const info = getAudioInfo();
+      if (info) {
+        const pct = info.progress * 100;
+        if (fillRef.current) fillRef.current.style.width = `${pct}%`;
+        if (knobRef.current) knobRef.current.style.left = `calc(${pct}% - 8px)`;
+        if (elapsedRef.current) elapsedRef.current.textContent = formatTime(info.elapsed);
+        if (durationRef.current) durationRef.current.textContent = formatTime(info.duration);
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [getAudioInfo]);
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem('device_token');
@@ -49,29 +73,26 @@ export default function NowPlaying() {
   const handleReport = useCallback(() => { setShowFlag(true); }, []);
   const handleFlagDone = useCallback((reason: string) => {
     setShowFlag(false);
-    if (playState.currentSong) {
-      sendFeedback(playState.currentSong.id, 'report', reason).catch(() => {});
+    if (currentSong) {
+      sendFeedback(currentSong.id, 'report', reason).catch(() => {});
     }
     skip();
-  }, [skip, playState.currentSong]);
+  }, [skip, currentSong]);
   const handleFlagClose = useCallback(() => { setShowFlag(false); }, []);
 
   const handleLove = useCallback(() => {
     setLovePulse(true);
     setTimeout(() => setLovePulse(false), 1000);
-    if (playState.currentSong) {
-      sendFeedback(playState.currentSong.id, 'love').catch(() => {});
+    if (currentSong) {
+      sendFeedback(currentSong.id, 'love').catch(() => {});
     }
-  }, [playState.currentSong]);
+  }, [currentSong]);
 
   const handleReportClick = useCallback(() => {
     setReportPulse(true);
     setTimeout(() => setReportPulse(false), 700);
     handleReport();
   }, [handleReport]);
-
-  const song = playState.currentSong;
-  const duration = song?.duration_seconds || 0;
 
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
@@ -132,45 +153,55 @@ export default function NowPlaying() {
               textTransform: 'uppercase', textAlign: 'center',
               padding: '0 40px', marginBottom: 64,
             }}>
-              {song?.title || ''}
+              {currentSong?.title || ''}
             </div>
           )}
 
-          {/* Progress bar */}
-          {song && (
+          {/* Progress bar — fill and knob updated via rAF refs, not React state */}
+          {currentSong && (
             <div style={{ width: '88%', maxWidth: 540 }}>
               <div style={{ position: 'relative', height: 6, background: 'rgba(255,255,255,0.04)', borderRadius: 3 }}>
-                <div style={{
-                  height: 6, borderRadius: 3,
-                  background: 'rgba(74,144,164,0.4)',
-                  width: `${playState.progress * 100}%`,
-                  transition: 'width 0.2s linear',
-                }} />
-                <div style={{
-                  position: 'absolute', top: -5,
-                  left: `calc(${playState.progress * 100}% - 8px)`,
-                  width: 16, height: 16, borderRadius: '50%',
-                  background: 'rgba(255,255,255,0.65)',
-                  border: '2px solid rgba(74,144,164,0.45)',
-                  transition: 'left 0.2s linear',
-                }} />
+                <div
+                  ref={fillRef}
+                  style={{
+                    height: 6, borderRadius: 3,
+                    background: 'rgba(74,144,164,0.4)',
+                    width: '0%',
+                  }}
+                />
+                <div
+                  ref={knobRef}
+                  style={{
+                    position: 'absolute', top: -5,
+                    left: 'calc(0% - 8px)',
+                    width: 16, height: 16, borderRadius: '50%',
+                    background: 'rgba(255,255,255,0.65)',
+                    border: '2px solid rgba(74,144,164,0.45)',
+                  }}
+                />
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 }}>
-                <span style={{ fontSize: 10, fontWeight: 200, color: 'rgba(255,255,255,0.08)', letterSpacing: 1, fontVariantNumeric: 'tabular-nums' }}>
-                  {formatTime(playState.elapsed)}
+                <span
+                  ref={elapsedRef}
+                  style={{ fontSize: 10, fontWeight: 200, color: 'rgba(255,255,255,0.08)', letterSpacing: 1, fontVariantNumeric: 'tabular-nums' }}
+                >
+                  0:00
                 </span>
-                <span style={{ fontSize: 10, fontWeight: 200, color: 'rgba(255,255,255,0.08)', letterSpacing: 1, fontVariantNumeric: 'tabular-nums' }}>
-                  {formatTime(duration)}
+                <span
+                  ref={durationRef}
+                  style={{ fontSize: 10, fontWeight: 200, color: 'rgba(255,255,255,0.08)', letterSpacing: 1, fontVariantNumeric: 'tabular-nums' }}
+                >
+                  {formatTime(currentSong.duration_seconds || 0)}
                 </span>
               </div>
             </div>
           )}
 
           {/* Play + Skip buttons */}
-          {song && (
+          {currentSong && (
             <div style={{ display: 'flex', gap: 48, marginTop: 60 }}>
               <CircleButton onClick={togglePlayPause}>
-                {playState.isPlaying ? (
+                {isPlaying ? (
                   <svg width="28" height="28" viewBox="0 0 28 28">
                     <rect x="7" y="5" width="5" height="18" rx="1.5" fill="rgba(255,255,255,0.65)" />
                     <rect x="16" y="5" width="5" height="18" rx="1.5" fill="rgba(255,255,255,0.65)" />
@@ -191,7 +222,7 @@ export default function NowPlaying() {
         </div>
 
         {/* Bottom edge icons */}
-        {song && (
+        {currentSong && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 36px' }}>
             <EdgeButton onClick={handleReportClick} pulse={reportPulse} pulseColor="240,153,123">
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
