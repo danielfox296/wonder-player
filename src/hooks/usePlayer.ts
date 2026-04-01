@@ -114,7 +114,18 @@ export function usePlayer() {
     fadeIn.volume = 0;
     fadeIn.load();
 
-    try { await fadeIn.play(); } catch { /* autoplay policy */ }
+    try {
+      await fadeIn.play();
+    } catch {
+      // Autoplay blocked — update title but mark as not playing
+      activeRef.current = activeRef.current === 'A' ? 'B' : 'A';
+      setCurrent(nextSong);
+      setIsPlaying(false);
+      crossfadingRef.current = false;
+      fadeOut.pause();
+      fadeOut.src = '';
+      return;
+    }
 
     activeRef.current = activeRef.current === 'A' ? 'B' : 'A';
     setCurrent(nextSong);
@@ -182,8 +193,20 @@ export function usePlayer() {
         }
       }).catch(() => {});
     } else {
-      el.pause();
-      setIsPlaying(false);
+      // Smooth 80ms fade-out to avoid audible click
+      const originalVol = el.volume;
+      let step = 0;
+      const fadeSteps = 8;
+      const iv = setInterval(() => {
+        step++;
+        el.volume = Math.max(0, originalVol * (1 - step / fadeSteps));
+        if (step >= fadeSteps) {
+          clearInterval(iv);
+          el.pause();
+          el.volume = originalVol;
+          setIsPlaying(false);
+        }
+      }, 10);
     }
   }, []);
 
@@ -210,7 +233,7 @@ export function usePlayer() {
     const earlyFadeRef = { triggered: false };
     const checkEarlyFade = () => {
       const el = getActive();
-      if (!el || !el.duration || isNaN(el.duration) || crossfadingRef.current) return;
+      if (!el || !el.duration || isNaN(el.duration) || crossfadingRef.current || el.paused) return;
       if (el.duration - el.currentTime <= 3 && !earlyFadeRef.triggered) {
         earlyFadeRef.triggered = true;
         crossfadeToNext(false); // 3s natural crossfade
