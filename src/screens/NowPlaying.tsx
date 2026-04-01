@@ -12,8 +12,8 @@ function formatTime(sec: number): string {
 }
 
 export default function NowPlaying() {
-  const { currentSong, isPlaying, loaded, loadPlaylist, togglePlayPause, skip, songs, getAudioInfo } = usePlayer();
-  useAmbientMonitor(300000); // Sample ambient dB every 5 minutes
+  const { currentSong, isPlaying, loaded, loadPlaylist, togglePlayPause, skip, songs, getAudioInfo, lovedIds, markLoved } = usePlayer();
+  useAmbientMonitor(300000);
   const [showFlag, setShowFlag] = useState(false);
   const [reportPulse, setReportPulse] = useState(false);
   const [lovePulse, setLovePulse] = useState(false);
@@ -22,13 +22,13 @@ export default function NowPlaying() {
   const clientName = localStorage.getItem('client_name') || '';
   const storeName = localStorage.getItem('store_name') || '';
 
-  // DOM refs for progress — updated directly from rAF, no React re-renders
+  const isLoved = currentSong ? lovedIds.has(currentSong.id) : false;
+
   const fillRef = useRef<HTMLDivElement>(null);
   const knobRef = useRef<HTMLDivElement>(null);
   const elapsedRef = useRef<HTMLSpanElement>(null);
   const durationRef = useRef<HTMLSpanElement>(null);
 
-  // rAF loop: writes directly to DOM, bypasses React reconciliation entirely
   useEffect(() => {
     let rafId: number;
     const tick = () => {
@@ -56,7 +56,6 @@ export default function NowPlaying() {
 
   useEffect(() => { loadPlaylist(); }, [loadPlaylist]);
 
-  // Connection check every 30s
   useEffect(() => {
     const check = async () => {
       try {
@@ -75,9 +74,7 @@ export default function NowPlaying() {
   const handleReport = useCallback(() => { setShowFlag(true); }, []);
   const handleFlagDone = useCallback((reason: string) => {
     setShowFlag(false);
-    if (currentSong) {
-      sendFeedback(currentSong.id, 'report', reason).catch(() => {});
-    }
+    if (currentSong) sendFeedback(currentSong.id, 'report', reason).catch(() => {});
     skip();
   }, [skip, currentSong]);
   const handleFlagClose = useCallback(() => { setShowFlag(false); }, []);
@@ -86,9 +83,10 @@ export default function NowPlaying() {
     setLovePulse(true);
     setTimeout(() => setLovePulse(false), 1000);
     if (currentSong) {
+      markLoved(currentSong.id);
       sendFeedback(currentSong.id, 'love').catch(() => {});
     }
-  }, [currentSong]);
+  }, [currentSong, markLoved]);
 
   const handleReportClick = useCallback(() => {
     setReportPulse(true);
@@ -100,7 +98,6 @@ export default function NowPlaying() {
     <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
       <Visualization />
 
-      {/* UI layer */}
       <div style={{ position: 'relative', zIndex: 1, width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
 
         {/* Header */}
@@ -129,11 +126,11 @@ export default function NowPlaying() {
             )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 20, fontWeight: 200, color: 'rgba(255,255,255,0.11)', letterSpacing: 0.5, textTransform: 'uppercase' }}>
+            <span style={{ fontSize: 20, fontWeight: 300, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.5, textTransform: 'uppercase' }}>
               {clientName}{clientName && storeName ? ' — ' : ''}{storeName}
             </span>
             <div style={{
-              width: 4, height: 4, borderRadius: '50%',
+              width: 5, height: 5, borderRadius: '50%',
               background: online ? '#27ae60' : '#e74c3c',
               animation: 'dp 3s ease-in-out infinite',
             }} />
@@ -145,13 +142,13 @@ export default function NowPlaying() {
 
           {/* Song title */}
           {loaded && songs.length === 0 ? (
-            <div style={{ fontSize: 14, fontWeight: 300, color: 'rgba(255,255,255,0.25)', letterSpacing: 2 }}>
+            <div style={{ fontSize: 14, fontWeight: 300, color: 'rgba(255,255,255,0.35)', letterSpacing: 2 }}>
               NO SONGS AVAILABLE
             </div>
           ) : (
             <div style={{
               fontSize: 24, fontWeight: 300,
-              color: 'rgba(255,255,255,0.55)', letterSpacing: 8, lineHeight: 1.7,
+              color: 'rgba(255,255,255,0.7)', letterSpacing: 8, lineHeight: 1.7,
               textTransform: 'uppercase', textAlign: 'center',
               padding: '0 40px', marginBottom: 64,
             }}>
@@ -159,15 +156,15 @@ export default function NowPlaying() {
             </div>
           )}
 
-          {/* Progress bar — fill and knob updated via rAF refs, not React state */}
+          {/* Progress bar */}
           {currentSong && (
             <div style={{ width: '88%', maxWidth: 540 }}>
-              <div style={{ position: 'relative', height: 6, background: 'rgba(255,255,255,0.04)', borderRadius: 3 }}>
+              <div style={{ position: 'relative', height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3 }}>
                 <div
                   ref={fillRef}
                   style={{
                     height: 6, borderRadius: 3,
-                    background: 'rgba(74,144,164,0.4)',
+                    background: 'rgba(74,144,164,0.5)',
                     width: '0%',
                   }}
                 />
@@ -177,73 +174,65 @@ export default function NowPlaying() {
                     position: 'absolute', top: -5,
                     left: 'calc(0% - 8px)',
                     width: 16, height: 16, borderRadius: '50%',
-                    background: 'rgba(255,255,255,0.65)',
-                    border: '2px solid rgba(74,144,164,0.45)',
+                    background: 'rgba(255,255,255,0.75)',
+                    border: '2px solid rgba(74,144,164,0.55)',
                   }}
                 />
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 }}>
-                <span
-                  ref={elapsedRef}
-                  style={{ fontSize: 10, fontWeight: 200, color: 'rgba(255,255,255,0.08)', letterSpacing: 1, fontVariantNumeric: 'tabular-nums' }}
-                >
-                  0:00
-                </span>
-                <span
-                  ref={durationRef}
-                  style={{ fontSize: 10, fontWeight: 200, color: 'rgba(255,255,255,0.08)', letterSpacing: 1, fontVariantNumeric: 'tabular-nums' }}
-                >
-                  {formatTime(currentSong.duration_seconds || 0)}
-                </span>
+                <span ref={elapsedRef} style={{ fontSize: 10, fontWeight: 200, color: 'rgba(255,255,255,0.15)', letterSpacing: 1, fontVariantNumeric: 'tabular-nums' }}>0:00</span>
+                <span ref={durationRef} style={{ fontSize: 10, fontWeight: 200, color: 'rgba(255,255,255,0.15)', letterSpacing: 1, fontVariantNumeric: 'tabular-nums' }}>{formatTime(currentSong.duration_seconds || 0)}</span>
               </div>
             </div>
           )}
 
-          {/* Play + Skip buttons */}
+          {/* Transport: Play + Skip (130% size, 2x border) */}
           {currentSong && (
             <div style={{ display: 'flex', gap: 48, marginTop: 60 }}>
               <CircleButton onClick={togglePlayPause}>
                 {isPlaying ? (
-                  <svg width="28" height="28" viewBox="0 0 28 28">
-                    <rect x="7" y="5" width="5" height="18" rx="1.5" fill="rgba(255,255,255,0.65)" />
-                    <rect x="16" y="5" width="5" height="18" rx="1.5" fill="rgba(255,255,255,0.65)" />
+                  <svg width="36" height="36" viewBox="0 0 28 28">
+                    <rect x="7" y="5" width="5" height="18" rx="1.5" fill="rgba(255,255,255,0.75)" />
+                    <rect x="16" y="5" width="5" height="18" rx="1.5" fill="rgba(255,255,255,0.75)" />
                   </svg>
                 ) : (
-                  <svg width="28" height="28" viewBox="0 0 28 28">
-                    <path d="M9 4l12 8-12 8z" fill="rgba(255,255,255,0.65)" />
+                  <svg width="36" height="36" viewBox="0 0 28 28">
+                    <path d="M9 4l12 8-12 8z" fill="rgba(255,255,255,0.75)" />
                   </svg>
                 )}
               </CircleButton>
               <CircleButton onClick={skip}>
-                <svg width="26" height="26" viewBox="0 0 24 24">
-                  <path d="M4.5 5l10 7-10 7zm12.5 0v14h2.5V5z" fill="rgba(255,255,255,0.65)" />
+                <svg width="34" height="34" viewBox="0 0 24 24">
+                  <path d="M4.5 5l10 7-10 7zm12.5 0v14h2.5V5z" fill="rgba(255,255,255,0.75)" />
                 </svg>
               </CircleButton>
             </div>
           )}
-        </div>
 
-        {/* Feedback buttons — below transport, visible against any background */}
-        {currentSong && (
-          <div style={{
-            display: 'flex', justifyContent: 'center', gap: 64,
-            padding: '20px 36px 32px',
-          }}>
-            <FeedbackButton onClick={handleReportClick} pulse={reportPulse} pulseColor="240,153,123" label="Report">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="10" stroke={reportPulse ? 'rgba(240,153,123,0.8)' : 'rgba(240,153,123,0.5)'} strokeWidth="1.3" />
-                <line x1="12" y1="8" x2="12" y2="13" stroke={reportPulse ? 'rgba(240,153,123,0.8)' : 'rgba(240,153,123,0.5)'} strokeWidth="1.3" strokeLinecap="round" />
-                <circle cx="12" cy="16" r="0.7" fill={reportPulse ? 'rgba(240,153,123,0.8)' : 'rgba(240,153,123,0.5)'} />
-              </svg>
-            </FeedbackButton>
-            <FeedbackButton onClick={handleLove} pulse={lovePulse} pulseColor="93,202,165" label="Love">
-              <svg width="32" height="32" viewBox="0 0 24 24">
-                <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
-                  fill={lovePulse ? 'rgba(93,202,165,0.9)' : 'rgba(93,202,165,0.5)'} />
-              </svg>
-            </FeedbackButton>
-          </div>
-        )}
+          {/* Feedback: Report + Love (larger, brighter, no labels) */}
+          {currentSong && (
+            <div style={{ display: 'flex', gap: 56, marginTop: 48 }}>
+              <FeedbackButton onClick={handleReportClick} pulse={reportPulse} pulseColor="240,153,123">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke={reportPulse ? 'rgba(240,153,123,0.9)' : 'rgba(240,153,123,0.6)'} strokeWidth="1.5" />
+                  <line x1="12" y1="8" x2="12" y2="13" stroke={reportPulse ? 'rgba(240,153,123,0.9)' : 'rgba(240,153,123,0.6)'} strokeWidth="1.5" strokeLinecap="round" />
+                  <circle cx="12" cy="16" r="0.8" fill={reportPulse ? 'rgba(240,153,123,0.9)' : 'rgba(240,153,123,0.6)'} />
+                </svg>
+              </FeedbackButton>
+              <FeedbackButton onClick={handleLove} pulse={lovePulse} pulseColor="93,202,165">
+                <svg width="36" height="36" viewBox="0 0 24 24">
+                  {isLoved || lovePulse ? (
+                    <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
+                      fill={lovePulse ? 'rgba(93,202,165,0.95)' : 'rgba(93,202,165,0.7)'} />
+                  ) : (
+                    <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
+                      fill="none" stroke="rgba(93,202,165,0.6)" strokeWidth="1.5" />
+                  )}
+                </svg>
+              </FeedbackButton>
+            </div>
+          )}
+        </div>
       </div>
 
       {showFlag && <FlagModal onSelect={handleFlagDone} onClose={handleFlagClose} />}
@@ -263,9 +252,9 @@ function CircleButton({ onClick, children }: { onClick: () => void; children: Re
       onPointerLeave={() => { setPressed(false); setHovered(false); }}
       onPointerEnter={() => setHovered(true)}
       style={{
-        width: 80, height: 80, borderRadius: '50%',
-        border: `1px solid ${hovered || pressed ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.09)'}`,
-        background: pressed ? 'rgba(255,255,255,0.1)' : hovered ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.03)',
+        width: 104, height: 104, borderRadius: '50%',
+        border: `2px solid ${hovered || pressed ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.15)'}`,
+        background: pressed ? 'rgba(255,255,255,0.12)' : hovered ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)',
         cursor: 'pointer',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         transition: 'transform 0.12s, border-color 0.3s, background 0.3s',
@@ -279,7 +268,7 @@ function CircleButton({ onClick, children }: { onClick: () => void; children: Re
   );
 }
 
-function FeedbackButton({ onClick, children, pulse, pulseColor, label }: { onClick: () => void; children: React.ReactNode; pulse: boolean; pulseColor: string; label: string }) {
+function FeedbackButton({ onClick, children, pulse, pulseColor }: { onClick: () => void; children: React.ReactNode; pulse: boolean; pulseColor: string }) {
   const [pressed, setPressed] = useState(false);
   const [hovered, setHovered] = useState(false);
   return (
@@ -291,29 +280,18 @@ function FeedbackButton({ onClick, children, pulse, pulseColor, label }: { onCli
       onPointerLeave={() => { setPressed(false); setHovered(false); }}
       onPointerEnter={() => setHovered(true)}
       style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-        background: 'none', border: 'none', cursor: 'pointer', outline: 'none',
-        transition: 'transform 0.15s',
-        transform: pulse ? 'scale(1.12)' : pressed ? 'scale(0.88)' : 'scale(1)',
+        width: 72, height: 72, borderRadius: '50%',
+        border: `1px solid ${pulse ? `rgba(${pulseColor},0.35)` : hovered ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.06)'}`,
+        background: pulse ? `rgba(${pulseColor},0.12)` : hovered ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.15)',
+        backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+        cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'transform 0.15s, border-color 0.3s, background 0.3s',
+        transform: pulse ? 'scale(1.15)' : pressed ? 'scale(0.88)' : 'scale(1)',
+        outline: 'none',
       }}
     >
-      <div style={{
-        width: 64, height: 64, borderRadius: '50%',
-        border: `1px solid ${pulse ? `rgba(${pulseColor},0.3)` : hovered ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)'}`,
-        background: pulse ? `rgba(${pulseColor},0.1)` : hovered ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.2)',
-        backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'border-color 0.3s, background 0.3s',
-      }}>
-        {children}
-      </div>
-      <span style={{
-        fontSize: 9, fontWeight: 400, letterSpacing: 1.5, textTransform: 'uppercase',
-        color: pulse ? `rgba(${pulseColor},0.8)` : 'rgba(255,255,255,0.25)',
-        transition: 'color 0.3s',
-      }}>
-        {label}
-      </span>
+      {children}
     </button>
   );
 }

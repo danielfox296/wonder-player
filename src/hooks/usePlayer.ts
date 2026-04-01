@@ -42,7 +42,7 @@ export function usePlayer() {
     currentSongRef.current = song;
     setCurrentSong(song);
     // Update document title + lock screen metadata
-    document.title = song?.title ? `${song.title} — Entuned` : 'Entuned';
+    document.title = song?.title ? `Playing ${song.title} - Entuned` : 'Entuned';
     if ('mediaSession' in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: song?.title || 'Untitled',
@@ -122,7 +122,7 @@ export function usePlayer() {
 
     logPlayStart(nextSong.id);
 
-    const totalSteps = quick ? 15 : 30; // 1.5s or 3s
+    const totalSteps = quick ? 6 : 30; // 0.6s skip or 3s natural ending
     let step = 0;
     if (fadeTimerRef.current) clearInterval(fadeTimerRef.current);
     fadeTimerRef.current = window.setInterval(() => {
@@ -206,7 +206,21 @@ export function usePlayer() {
     audioA.current.preload = 'auto';
     audioB.current.preload = 'auto';
 
-    const onEnded = () => crossfadeToNext();
+    // Crossfade 3s before song ends for seamless overlap
+    const earlyFadeRef = { triggered: false };
+    const checkEarlyFade = () => {
+      const el = getActive();
+      if (!el || !el.duration || isNaN(el.duration) || crossfadingRef.current) return;
+      if (el.duration - el.currentTime <= 3 && !earlyFadeRef.triggered) {
+        earlyFadeRef.triggered = true;
+        crossfadeToNext(false); // 3s natural crossfade
+      }
+      if (el.currentTime < el.duration - 5) earlyFadeRef.triggered = false;
+    };
+    const fadeCheckInterval = setInterval(checkEarlyFade, 500);
+
+    // Fallback: if song ends without early fade (very short songs)
+    const onEnded = () => { if (!crossfadingRef.current) crossfadeToNext(); };
     audioA.current.addEventListener('ended', onEnded);
     audioB.current.addEventListener('ended', onEnded);
 
@@ -229,8 +243,21 @@ export function usePlayer() {
       audioA.current?.pause();
       audioB.current?.pause();
       if (fadeTimerRef.current) clearInterval(fadeTimerRef.current);
+      clearInterval(fadeCheckInterval);
     };
   }, []);
 
-  return { currentSong, isPlaying, songs, loaded, loadPlaylist, togglePlayPause, skip, getAudioInfo };
+  // Track loved songs across session
+  const [lovedIds, setLovedIds] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('loved_songs') || '[]')); } catch { return new Set(); }
+  });
+  const markLoved = useCallback((songId: string) => {
+    setLovedIds(prev => {
+      const next = new Set(prev).add(songId);
+      localStorage.setItem('loved_songs', JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+
+  return { currentSong, isPlaying, songs, loaded, loadPlaylist, togglePlayPause, skip, getAudioInfo, lovedIds, markLoved };
 }
