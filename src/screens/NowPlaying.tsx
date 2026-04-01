@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { usePlayer } from '../hooks/usePlayer.js';
+import { useAmbientMonitor } from '../hooks/useAmbientMonitor.js';
 import Visualization from '../components/Visualization.js';
 import FlagModal from '../components/FlagModal.js';
 import { sendFeedback } from '../lib/api.js';
@@ -12,6 +13,7 @@ function formatTime(sec: number): string {
 
 export default function NowPlaying() {
   const { currentSong, isPlaying, loaded, loadPlaylist, togglePlayPause, skip, songs, getAudioInfo } = usePlayer();
+  useAmbientMonitor(300000); // Sample ambient dB every 5 minutes
   const [showFlag, setShowFlag] = useState(false);
   const [reportPulse, setReportPulse] = useState(false);
   const [lovePulse, setLovePulse] = useState(false);
@@ -221,22 +223,25 @@ export default function NowPlaying() {
           )}
         </div>
 
-        {/* Bottom edge icons */}
+        {/* Feedback buttons — below transport, visible against any background */}
         {currentSong && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 36px' }}>
-            <EdgeButton onClick={handleReportClick} pulse={reportPulse} pulseColor="240,153,123">
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="10" stroke={reportPulse ? 'rgba(240,153,123,0.7)' : 'rgba(240,153,123,0.35)'} strokeWidth="1.2" />
-                <line x1="12" y1="8" x2="12" y2="13" stroke={reportPulse ? 'rgba(240,153,123,0.7)' : 'rgba(240,153,123,0.35)'} strokeWidth="1.2" strokeLinecap="round" />
-                <circle cx="12" cy="16" r="0.5" fill={reportPulse ? 'rgba(240,153,123,0.7)' : 'rgba(240,153,123,0.35)'} />
+          <div style={{
+            display: 'flex', justifyContent: 'center', gap: 64,
+            padding: '20px 36px 32px',
+          }}>
+            <FeedbackButton onClick={handleReportClick} pulse={reportPulse} pulseColor="240,153,123" label="Report">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke={reportPulse ? 'rgba(240,153,123,0.8)' : 'rgba(240,153,123,0.5)'} strokeWidth="1.3" />
+                <line x1="12" y1="8" x2="12" y2="13" stroke={reportPulse ? 'rgba(240,153,123,0.8)' : 'rgba(240,153,123,0.5)'} strokeWidth="1.3" strokeLinecap="round" />
+                <circle cx="12" cy="16" r="0.7" fill={reportPulse ? 'rgba(240,153,123,0.8)' : 'rgba(240,153,123,0.5)'} />
               </svg>
-            </EdgeButton>
-            <EdgeButton onClick={handleLove} pulse={lovePulse} pulseColor="93,202,165">
-              <svg width="26" height="26" viewBox="0 0 24 24">
+            </FeedbackButton>
+            <FeedbackButton onClick={handleLove} pulse={lovePulse} pulseColor="93,202,165" label="Love">
+              <svg width="32" height="32" viewBox="0 0 24 24">
                 <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
-                  fill={lovePulse ? 'rgba(93,202,165,0.8)' : 'rgba(93,202,165,0.3)'} />
+                  fill={lovePulse ? 'rgba(93,202,165,0.9)' : 'rgba(93,202,165,0.5)'} />
               </svg>
-            </EdgeButton>
+            </FeedbackButton>
           </div>
         )}
       </div>
@@ -274,7 +279,7 @@ function CircleButton({ onClick, children }: { onClick: () => void; children: Re
   );
 }
 
-function EdgeButton({ onClick, children, pulse, pulseColor }: { onClick: () => void; children: React.ReactNode; pulse: boolean; pulseColor: string }) {
+function FeedbackButton({ onClick, children, pulse, pulseColor, label }: { onClick: () => void; children: React.ReactNode; pulse: boolean; pulseColor: string; label: string }) {
   const [pressed, setPressed] = useState(false);
   const [hovered, setHovered] = useState(false);
   return (
@@ -286,17 +291,29 @@ function EdgeButton({ onClick, children, pulse, pulseColor }: { onClick: () => v
       onPointerLeave={() => { setPressed(false); setHovered(false); }}
       onPointerEnter={() => setHovered(true)}
       style={{
-        width: 52, height: 52, borderRadius: '50%',
-        border: `1px solid ${pulse ? `rgba(${pulseColor},0.2)` : hovered ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.0)'}`,
-        background: pulse ? `rgba(${pulseColor},0.08)` : pressed ? 'rgba(255,255,255,0.08)' : hovered ? 'rgba(255,255,255,0.04)' : 'transparent',
-        cursor: 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'transform 0.15s, border-color 0.3s, background 0.3s',
-        transform: pulse ? 'scale(1.15)' : pressed ? 'scale(0.85)' : 'scale(1)',
-        outline: 'none',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+        background: 'none', border: 'none', cursor: 'pointer', outline: 'none',
+        transition: 'transform 0.15s',
+        transform: pulse ? 'scale(1.12)' : pressed ? 'scale(0.88)' : 'scale(1)',
       }}
     >
-      {children}
+      <div style={{
+        width: 64, height: 64, borderRadius: '50%',
+        border: `1px solid ${pulse ? `rgba(${pulseColor},0.3)` : hovered ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)'}`,
+        background: pulse ? `rgba(${pulseColor},0.1)` : hovered ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.2)',
+        backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'border-color 0.3s, background 0.3s',
+      }}>
+        {children}
+      </div>
+      <span style={{
+        fontSize: 9, fontWeight: 400, letterSpacing: 1.5, textTransform: 'uppercase',
+        color: pulse ? `rgba(${pulseColor},0.8)` : 'rgba(255,255,255,0.25)',
+        transition: 'color 0.3s',
+      }}>
+        {label}
+      </span>
     </button>
   );
 }

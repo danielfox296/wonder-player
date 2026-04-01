@@ -41,6 +41,15 @@ export function usePlayer() {
   const setCurrent = (song: Song | null) => {
     currentSongRef.current = song;
     setCurrentSong(song);
+    // Update document title + lock screen metadata
+    document.title = song?.title ? `${song.title} — Entuned` : 'Entuned';
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: song?.title || 'Untitled',
+        artist: localStorage.getItem('store_name') || '',
+        album: localStorage.getItem('client_name') || '',
+      });
+    }
   };
 
   const logPlayStart = async (songId: string) => {
@@ -80,7 +89,8 @@ export function usePlayer() {
   }, []);
 
   // Stable crossfade — [] deps because it reads refs only, never closes over state
-  const crossfadeToNext = useCallback(async () => {
+  // quick=true: 1.5s fade (user skip), quick=false: 3s fade (natural ending)
+  const crossfadeToNext = useCallback(async (quick = false) => {
     if (crossfadingRef.current) return;
 
     // Replenish queue if empty
@@ -95,7 +105,6 @@ export function usePlayer() {
     await logPlayEnd(fadeOut.currentTime);
 
     const nextSong = queueRef.current.shift()!;
-    // Pre-emptively reshuffle so queue is never empty when needed
     if (queueRef.current.length === 0) {
       queueRef.current = shuffle(allSongsRef.current);
     }
@@ -105,24 +114,23 @@ export function usePlayer() {
     fadeIn.volume = 0;
     fadeIn.load();
 
-    try { await fadeIn.play(); } catch { /* autoplay policy — will play once user interacts */ }
+    try { await fadeIn.play(); } catch { /* autoplay policy */ }
 
-    // Swap active ref so getAudioInfo() tracks the new song immediately
     activeRef.current = activeRef.current === 'A' ? 'B' : 'A';
     setCurrent(nextSong);
     setIsPlaying(true);
 
     logPlayStart(nextSong.id);
 
-    // 3-second crossfade: 30 steps × 100ms
+    const totalSteps = quick ? 15 : 30; // 1.5s or 3s
     let step = 0;
     if (fadeTimerRef.current) clearInterval(fadeTimerRef.current);
     fadeTimerRef.current = window.setInterval(() => {
       step++;
-      const ratio = step / 30;
+      const ratio = step / totalSteps;
       fadeOut.volume = Math.max(0, 1 - ratio);
       fadeIn.volume = Math.min(1, ratio);
-      if (step >= 30) {
+      if (step >= totalSteps) {
         clearInterval(fadeTimerRef.current!);
         fadeTimerRef.current = null;
         fadeOut.pause();
@@ -130,7 +138,7 @@ export function usePlayer() {
         crossfadingRef.current = false;
       }
     }, 100);
-  }, []); // stable — safe to use in event listeners without re-registration
+  }, []);
 
   const loadPlaylist = useCallback(async () => {
     try {
@@ -179,9 +187,19 @@ export function usePlayer() {
     }
   }, []);
 
-  const skip = useCallback(() => { crossfadeToNext(); }, [crossfadeToNext]);
+  const skip = useCallback(() => {
+    // Cancel any in-progress crossfade so skip is always responsive
+    if (fadeTimerRef.current) {
+      clearInterval(fadeTimerRef.current);
+      fadeTimerRef.current = null;
+      const old = getInactive();
+      if (old) { old.pause(); old.src = ''; }
+      crossfadingRef.current = false;
+    }
+    crossfadeToNext(true); // quick 1.5s fade
+  }, [crossfadeToNext]);
 
-  // Set up audio elements and ended listeners once — crossfadeToNext is stable so no re-registration needed
+  // Set up audio elements, ended listeners, and lock screen controls
   useEffect(() => {
     audioA.current = new Audio();
     audioB.current = new Audio();
@@ -191,6 +209,19 @@ export function usePlayer() {
     const onEnded = () => crossfadeToNext();
     audioA.current.addEventListener('ended', onEnded);
     audioB.current.addEventListener('ended', onEnded);
+
+    // Lock screen / notification controls (iOS Safari 15+, Chrome, etc.)
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.setActionHandler('play', () => {
+        const el = audioA.current?.paused === false ? audioA.current : audioB.current;
+        if (el?.src) el.play().catch(() => {});
+      });
+      navigator.mediaSession.setActionHandler('pause', () => {
+        const el = audioA.current?.paused === false ? audioA.current : audioB.current;
+        el?.pause();
+      });
+      navigator.mediaSession.setActionHandler('nexttrack', () => skip());
+    }
 
     return () => {
       audioA.current?.removeEventListener('ended', onEnded);
