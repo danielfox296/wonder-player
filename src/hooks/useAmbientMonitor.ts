@@ -6,21 +6,35 @@ import { playerApi } from '../lib/api.js';
  * Captures 3 seconds of audio every `intervalMs`, computes RMS → dB,
  * and sends the reading to the server.
  * Silently does nothing if microphone permission is denied.
+ *
+ * AudioContext creation is deferred until after a user gesture
+ * (click/touch/keydown) to avoid browser suspension issues.
  */
 export function useAmbientMonitor(intervalMs = 300000) {
   const streamRef = useRef<MediaStream | null>(null);
   const contextRef = useRef<AudioContext | null>(null);
+  const initedRef = useRef(false);
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval>;
     let mounted = true;
 
-    async function init() {
+    async function startMonitoring() {
+      if (initedRef.current) return;
+      initedRef.current = true;
+
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         if (!mounted) { stream.getTracks().forEach(t => t.stop()); return; }
         streamRef.current = stream;
-        contextRef.current = new AudioContext();
+
+        // AudioContext is created after user gesture, so it starts in 'running' state
+        const ctx = new AudioContext();
+        if (ctx.state === 'suspended') {
+          await ctx.resume();
+        }
+        if (!mounted) { ctx.close(); stream.getTracks().forEach(t => t.stop()); return; }
+        contextRef.current = ctx;
 
         // Take first reading immediately, then on interval
         sample();
@@ -74,10 +88,33 @@ export function useAmbientMonitor(intervalMs = 300000) {
       }
     }
 
-    init();
+    // Defer initialization until a user gesture occurs, which ensures
+    // AudioContext can start in 'running' state on all browsers
+    const gestureEvents = ['click', 'touchstart', 'keydown'] as const;
+    const onGesture = () => {
+      gestureEvents.forEach(e => document.removeEventListener(e, onGesture));
+      startMonitoring();
+    };
+    gestureEvents.forEach(e => document.addEventListener(e, onGesture, { once: false }));
+
+    // If the document already has had interaction (e.g., user navigated here via button),
+    // check if AudioContext would be allowed by testing with a throwaway context
+    try {
+      const test = new AudioContext();
+      if (test.state === 'running') {
+        test.close();
+        gestureEvents.forEach(e => document.removeEventListener(e, onGesture));
+        startMonitoring();
+      } else {
+        test.close();
+      }
+    } catch {
+      // Will wait for gesture
+    }
 
     return () => {
       mounted = false;
+      gestureEvents.forEach(e => document.removeEventListener(e, onGesture));
       if (timer) clearInterval(timer);
       streamRef.current?.getTracks().forEach(t => t.stop());
       contextRef.current?.close().catch(() => {});

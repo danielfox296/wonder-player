@@ -110,20 +110,33 @@ export function usePlayer() {
     }
 
     const fadeIn = getInactive()!;
+
+    // Skip tracks with missing audio URLs
+    if (!nextSong.audio_url) {
+      console.warn('[player] Skipping track with no audio URL:', nextSong.title);
+      crossfadingRef.current = false;
+      crossfadeToNext(quick);
+      return;
+    }
+
     fadeIn.src = nextSong.audio_url;
     fadeIn.volume = 0;
     fadeIn.load();
 
     try {
+      await new Promise<void>((resolve, reject) => {
+        const onCanPlay = () => { fadeIn.removeEventListener('error', onError); resolve(); };
+        const onError = () => { fadeIn.removeEventListener('canplay', onCanPlay); reject(new Error('load failed')); };
+        fadeIn.addEventListener('canplay', onCanPlay, { once: true });
+        fadeIn.addEventListener('error', onError, { once: true });
+      });
       await fadeIn.play();
-    } catch {
-      // Autoplay blocked — update title but mark as not playing
-      activeRef.current = activeRef.current === 'A' ? 'B' : 'A';
-      setCurrent(nextSong);
-      setIsPlaying(false);
+    } catch (err) {
+      console.warn('[player] Failed to play track, skipping:', nextSong.title, err);
+      fadeIn.src = '';
       crossfadingRef.current = false;
-      fadeOut.pause();
-      fadeOut.src = '';
+      // Auto-skip to next track on load/play failure
+      crossfadeToNext(quick);
       return;
     }
 
@@ -159,20 +172,39 @@ export function usePlayer() {
       setSongs(s);
       if (s.length > 0) {
         queueRef.current = shuffle(s);
-        const first = queueRef.current.shift()!;
-        const el = getActive()!;
-        el.src = first.audio_url;
-        el.volume = 1;
-        el.load();
-        try {
-          await el.play();
-          setCurrent(first);
-          setIsPlaying(true);
-          logPlayStart(first.id);
-        } catch {
-          // Autoplay blocked — show title and play button so user can start manually
-          setCurrent(first);
-          setIsPlaying(false);
+
+        // Find the first track that actually loads
+        let started = false;
+        while (queueRef.current.length > 0 && !started) {
+          const candidate = queueRef.current.shift()!;
+          if (!candidate.audio_url) {
+            console.warn('[player] Skipping track with no audio URL:', candidate.title);
+            continue;
+          }
+          const el = getActive()!;
+          el.src = candidate.audio_url;
+          el.volume = 1;
+          el.load();
+          try {
+            await new Promise<void>((resolve, reject) => {
+              const onCanPlay = () => { el.removeEventListener('error', onError); resolve(); };
+              const onError = () => { el.removeEventListener('canplay', onCanPlay); reject(new Error('load failed')); };
+              el.addEventListener('canplay', onCanPlay, { once: true });
+              el.addEventListener('error', onError, { once: true });
+            });
+            await el.play();
+            setCurrent(candidate);
+            setIsPlaying(true);
+            logPlayStart(candidate.id);
+            started = true;
+          } catch {
+            console.warn('[player] Failed to load/play, trying next:', candidate.title);
+            el.src = '';
+            // If autoplay is blocked (not a load error), still show the track
+            setCurrent(candidate);
+            setIsPlaying(false);
+            started = true;
+          }
         }
       }
       setLoaded(true);
