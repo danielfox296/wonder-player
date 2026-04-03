@@ -3,6 +3,7 @@ import { usePlayer } from '../hooks/usePlayer.js';
 import { useAmbientMonitor } from '../hooks/useAmbientMonitor.js';
 import Visualization from '../components/Visualization.js';
 import FlagModal from '../components/FlagModal.js';
+import OutcomeModal from '../components/OutcomeModal.js';
 import { sendFeedback } from '../lib/api.js';
 
 function formatTime(sec: number): string {
@@ -12,9 +13,10 @@ function formatTime(sec: number): string {
 }
 
 export default function NowPlaying() {
-  const { currentSong, isPlaying, loaded, loadPlaylist, togglePlayPause, skip, songs, getAudioInfo, lovedIds, markLoved } = usePlayer();
+  const { currentSong, isPlaying, loaded, loadPlaylist, togglePlayPause, skip, songs, getAudioInfo, lovedIds, markLoved, activeMode, changeMode } = usePlayer();
   useAmbientMonitor(300000);
   const [showFlag, setShowFlag] = useState(false);
+  const [showOutcome, setShowOutcome] = useState(false);
   const [reportPulse, setReportPulse] = useState(false);
   const [lovePulse, setLovePulse] = useState(false);
   const [online, setOnline] = useState(true);
@@ -125,7 +127,22 @@ export default function NowPlaying() {
               </button>
             )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button
+              type="button"
+              onClick={() => setShowOutcome(true)}
+              style={{
+                background: 'rgba(74,144,164,0.08)', border: '1px solid rgba(74,144,164,0.2)',
+                borderRadius: 20, padding: '4px 12px', cursor: 'pointer',
+                fontSize: 10, fontWeight: 400, letterSpacing: 1.5, textTransform: 'uppercase',
+                color: 'rgba(74,144,164,0.7)', transition: 'all 0.2s', outline: 'none',
+                fontFamily: "'Inter', sans-serif",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(74,144,164,0.4)'; e.currentTarget.style.color = 'rgba(74,144,164,0.9)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(74,144,164,0.2)'; e.currentTarget.style.color = 'rgba(74,144,164,0.7)'; }}
+            >
+              {activeMode}
+            </button>
             <span style={{ fontSize: 20, fontWeight: 300, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.5, textTransform: 'uppercase' }}>
               {clientName}{clientName && storeName ? ' — ' : ''}{storeName}
             </span>
@@ -236,6 +253,7 @@ export default function NowPlaying() {
       </div>
 
       {showFlag && <FlagModal onSelect={handleFlagDone} onClose={handleFlagClose} />}
+      {showOutcome && <OutcomeModal activeMode={activeMode} onSelectMode={changeMode} onClose={() => setShowOutcome(false)} />}
     </div>
   );
 }

@@ -19,6 +19,7 @@ export default function Setup() {
       localStorage.setItem('store_id', result.store_id);
       localStorage.setItem('store_name', result.store_name);
       localStorage.setItem('client_name', result.client_name);
+      if (result.default_mode) localStorage.setItem('default_mode', result.default_mode);
       navigate('/');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Setup failed');

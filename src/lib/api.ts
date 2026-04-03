@@ -32,6 +32,18 @@ export async function sendFeedback(song_id: string, type: 'love' | 'report', rea
   return playerApi('/api/player/feedback', { method: 'POST', body: { song_id, type, reason } });
 }
 
+export async function getNextTrack(mode: string, excludeIds: string[]) {
+  const exclude = excludeIds.join(',');
+  return playerApi<{ data: { id: string; title: string | null; audio_url: string; duration_seconds: number } }>(`/api/player/next-track?mode=${encodeURIComponent(mode)}&exclude=${encodeURIComponent(exclude)}`);
+}
+
+export async function logModeChange(previousMode: string | null, newMode: string) {
+  return playerApi('/api/player/events/mode-change', {
+    method: 'POST',
+    body: { previous_mode: previousMode, new_mode: newMode },
+  });
+}
+
 export async function setupDevice(email: string, password: string) {
   const res = await fetch(`${API}/api/player/auth/setup`, {
     method: 'POST',
@@ -40,5 +52,5 @@ export async function setupDevice(email: string, password: string) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error?.message || 'Setup failed');
-  return data.data as { device_token: string; store_id: string; store_name: string; client_name: string };
+  return data.data as { device_token: string; store_id: string; store_name: string; client_name: string; default_mode: string };
 }

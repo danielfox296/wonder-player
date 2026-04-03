@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { playerApi } from '../lib/api.js';
+import { playerApi, getNextTrack, logModeChange } from '../lib/api.js';
 
 interface Song {
   id: string;
@@ -14,6 +14,7 @@ export function usePlayer() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [songs, setSongs] = useState<Song[]>([]);
+  const [activeMode, setActiveMode] = useState<string>(() => localStorage.getItem('default_mode') || 'linger');
 
   // All mutable playback state lives in refs — no stale closures, no 60fps re-renders
   const audioA = useRef<HTMLAudioElement | null>(null);
@@ -25,6 +26,9 @@ export function usePlayer() {
   const fadeTimerRef = useRef<number | null>(null);
   const eventIdRef = useRef<string | null>(null);
   const currentSongRef = useRef<Song | null>(null);
+  const activeModeRef = useRef<string>(localStorage.getItem('default_mode') || 'linger');
+  const recentlyPlayedRef = useRef<string[]>([]);
+  const MAX_RECENT = 20;
 
   const getActive = () => activeRef.current === 'A' ? audioA.current : audioB.current;
   const getInactive = () => activeRef.current === 'A' ? audioB.current : audioA.current;
@@ -56,7 +60,7 @@ export function usePlayer() {
     try {
       const res = await playerApi<{ data: { id: string } }>('/api/player/events/play', {
         method: 'POST',
-        body: { song_id: songId, started_at: new Date().toISOString() },
+        body: { song_id: songId, started_at: new Date().toISOString(), active_mode: activeModeRef.current },
       });
       eventIdRef.current = res.data.id;
     } catch (err) {
@@ -88,25 +92,43 @@ export function usePlayer() {
     };
   }, []);
 
+  // Fetch next song: try mode-aware API first, fall back to queue
+  const fetchNextSong = async (): Promise<Song | null> => {
+    try {
+      const res = await getNextTrack(activeModeRef.current, recentlyPlayedRef.current);
+      return res.data;
+    } catch (err) {
+      console.warn('[player] next-track API failed, falling back to queue:', err);
+      // Fall back to shuffled queue from cached playlist
+      if (queueRef.current.length === 0) {
+        if (allSongsRef.current.length === 0) return null;
+        queueRef.current = shuffle(allSongsRef.current);
+      }
+      return queueRef.current.shift() || null;
+    }
+  };
+
+  const addToRecentlyPlayed = (songId: string) => {
+    recentlyPlayedRef.current.push(songId);
+    if (recentlyPlayedRef.current.length > MAX_RECENT) {
+      recentlyPlayedRef.current = recentlyPlayedRef.current.slice(-MAX_RECENT);
+    }
+  };
+
   // Stable crossfade — [] deps because it reads refs only, never closes over state
   // quick=true: 1.5s fade (user skip), quick=false: 3s fade (natural ending)
   const crossfadeToNext = useCallback(async (quick = false) => {
     if (crossfadingRef.current) return;
-
-    // Replenish queue if empty
-    if (queueRef.current.length === 0) {
-      if (allSongsRef.current.length === 0) return;
-      queueRef.current = shuffle(allSongsRef.current);
-    }
 
     crossfadingRef.current = true;
 
     const fadeOut = getActive()!;
     await logPlayEnd(fadeOut.currentTime);
 
-    const nextSong = queueRef.current.shift()!;
-    if (queueRef.current.length === 0) {
-      queueRef.current = shuffle(allSongsRef.current);
+    const nextSong = await fetchNextSong();
+    if (!nextSong) {
+      crossfadingRef.current = false;
+      return;
     }
 
     const fadeIn = getInactive()!;
@@ -143,6 +165,7 @@ export function usePlayer() {
     activeRef.current = activeRef.current === 'A' ? 'B' : 'A';
     setCurrent(nextSong);
     setIsPlaying(true);
+    addToRecentlyPlayed(nextSong.id);
 
     logPlayStart(nextSong.id);
 
@@ -314,5 +337,15 @@ export function usePlayer() {
     });
   }, []);
 
-  return { currentSong, isPlaying, songs, loaded, loadPlaylist, togglePlayPause, skip, getAudioInfo, lovedIds, markLoved };
+  const changeMode = useCallback((newMode: string) => {
+    const previousMode = activeModeRef.current;
+    if (previousMode === newMode) return;
+    activeModeRef.current = newMode;
+    setActiveMode(newMode);
+    logModeChange(previousMode, newMode).catch((err) => {
+      console.error('Failed to log mode change:', err);
+    });
+  }, []);
+
+  return { currentSong, isPlaying, songs, loaded, loadPlaylist, togglePlayPause, skip, getAudioInfo, lovedIds, markLoved, activeMode, changeMode };
 }
