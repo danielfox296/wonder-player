@@ -28,6 +28,7 @@ export function usePlayer() {
   const currentSongRef = useRef<Song | null>(null);
   const activeModeRef = useRef<string>(localStorage.getItem('default_mode') || 'linger');
   const recentlyPlayedRef = useRef<string[]>([]);
+  const intentionalPauseRef = useRef(false); // true when OUR code pauses (not system interruption)
   const MAX_RECENT = 20;
 
   const getActive = () => activeRef.current === 'A' ? audioA.current : audioB.current;
@@ -180,6 +181,7 @@ export function usePlayer() {
       if (step >= totalSteps) {
         clearInterval(fadeTimerRef.current!);
         fadeTimerRef.current = null;
+        intentionalPauseRef.current = true;
         fadeOut.pause();
         fadeOut.src = '';
         crossfadingRef.current = false;
@@ -222,8 +224,8 @@ export function usePlayer() {
             started = true;
           } catch {
             console.warn('[player] Failed to load/play, trying next:', candidate.title);
-            el.src = '';
-            // If autoplay is blocked (not a load error), still show the track
+            // Don't clear el.src — the track is loaded, just autoplay-blocked.
+            // Keeping the src lets togglePlayPause resume it on user tap.
             setCurrent(candidate);
             setIsPlaying(false);
             started = true;
@@ -257,6 +259,7 @@ export function usePlayer() {
         el.volume = Math.max(0, originalVol * (1 - step / fadeSteps));
         if (step >= fadeSteps) {
           clearInterval(iv);
+          intentionalPauseRef.current = true;
           el.pause();
           el.volume = originalVol;
           setIsPlaying(false);
@@ -271,7 +274,7 @@ export function usePlayer() {
       clearInterval(fadeTimerRef.current);
       fadeTimerRef.current = null;
       const old = getInactive();
-      if (old) { old.pause(); old.src = ''; }
+      if (old) { intentionalPauseRef.current = true; old.pause(); old.src = ''; }
       crossfadingRef.current = false;
     }
     crossfadeToNext(true); // quick 1.5s fade
@@ -302,6 +305,26 @@ export function usePlayer() {
     audioA.current.addEventListener('ended', onEnded);
     audioB.current.addEventListener('ended', onEnded);
 
+    // Auto-resume after system interruptions (calls, alarms, Siri, permission dialogs).
+    // If our code paused intentionally, intentionalPauseRef is true and we skip.
+    // Otherwise the OS stole audio focus — wait 1s then try to resume.
+    const onExternalPause = (e: Event) => {
+      const el = e.target as HTMLAudioElement;
+      if (intentionalPauseRef.current) {
+        intentionalPauseRef.current = false;
+        return;
+      }
+      // Only auto-resume the active element (not the one fading out)
+      if (el !== getActive()) return;
+      setTimeout(() => {
+        if (el.paused && el.src && !crossfadingRef.current) {
+          el.play().then(() => setIsPlaying(true)).catch(() => {});
+        }
+      }, 1000);
+    };
+    audioA.current.addEventListener('pause', onExternalPause);
+    audioB.current.addEventListener('pause', onExternalPause);
+
     // Lock screen / notification controls (iOS Safari 15+, Chrome, etc.)
     if ('mediaSession' in navigator) {
       navigator.mediaSession.setActionHandler('play', () => {
@@ -310,6 +333,7 @@ export function usePlayer() {
       });
       navigator.mediaSession.setActionHandler('pause', () => {
         const el = audioA.current?.paused === false ? audioA.current : audioB.current;
+        intentionalPauseRef.current = true;
         el?.pause();
       });
       navigator.mediaSession.setActionHandler('nexttrack', () => skip());
@@ -318,6 +342,9 @@ export function usePlayer() {
     return () => {
       audioA.current?.removeEventListener('ended', onEnded);
       audioB.current?.removeEventListener('ended', onEnded);
+      audioA.current?.removeEventListener('pause', onExternalPause);
+      audioB.current?.removeEventListener('pause', onExternalPause);
+      intentionalPauseRef.current = true;
       audioA.current?.pause();
       audioB.current?.pause();
       if (fadeTimerRef.current) clearInterval(fadeTimerRef.current);
