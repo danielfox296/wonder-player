@@ -80,8 +80,7 @@ const MODES: [number, number][] = [
   [22, 25], [25, 28],
 ];
 
-const GRID = 240;
-const BG_GRID = 160; // coarser grid for background layer (perf)
+const GRID = 200; // single layer grid
 
 // Color combinations: [line primary, line secondary, background]
 const COLOR_COMBOS: [number[], number[], number[]][] = [
@@ -115,6 +114,7 @@ function hashStr(str: string): number {
 export default function Visualization({ getAmplitude, connectAnalyser, getActiveElement, songId }: VisualizationProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bgRef = useRef<HTMLDivElement>(null);
+  const gradRef = useRef<HTMLDivElement>(null);
   const songIdRef = useRef<string | null>(null);
   const currentComboRef = useRef(0);
   const targetComboRef = useRef(0);
@@ -124,7 +124,6 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext('2d')!;
     const field = new Float32Array(GRID * GRID);
-    const bgField = new Float32Array(BG_GRID * BG_GRID);
     let time = 0;
     let smoothAmp = 0;
     let rafId: number;
@@ -222,32 +221,15 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
         bgRef.current.style.backgroundColor = `rgb(${Math.round(bgColor[0])},${Math.round(bgColor[1])},${Math.round(bgColor[2])})`;
       }
 
-      // --- Mode complexity: dramatic amplitude response ---
-      const timeModeBase = (Math.sin(time * 0.018) * 0.5 + 0.5) * 8;
-      const ampBoost = smoothAmp * (MODES.length - 1) * 0.85;
-      const modeProgress = Math.min(timeModeBase + ampBoost, MODES.length - 1.01);
+      // --- Mode complexity: amplitude + drift ---
+      const modeBase = (Math.sin(time * 0.011 + 2.0) * 0.5 + 0.5) * 8;
+      const modeProgress = Math.min(modeBase + smoothAmp * (MODES.length - 1) * 0.85, MODES.length - 1.01);
       const modeIdx = Math.min(Math.floor(modeProgress), MODES.length - 2);
       const modeFrac = modeProgress - modeIdx;
-
       const [n1, m1] = MODES[modeIdx];
       const [n2, m2] = MODES[modeIdx + 1];
-
-      const mix = 0.35 + Math.sin(time * 0.07) * 0.15;
-      const timeDrift = Math.sin(time * 0.12) * 0.015;
-
-      // --- 3D rotation (in-canvas projection) — fast, all directions ---
-      const radX = Math.sin(time * 0.15) * 0.7 + Math.sin(time * 0.067) * 0.3;
-      const radY = Math.sin(time * 0.12) * 0.65 + Math.cos(time * 0.053) * 0.25;
-      const radZ = Math.sin(time * 0.09) * 0.3 + Math.sin(time * 0.041) * 0.15;
-      const cosX = Math.cos(radX), sinX = Math.sin(radX);
-      const cosY = Math.cos(radY), sinY = Math.sin(radY);
-      const cosZ = Math.cos(radZ), sinZ = Math.sin(radZ);
-
-      // --- Dramatic zoom ---
-      const zoomBase = 1.5 + Math.sin(time * 0.019) * 0.15;
-      const zoomAmp = 1.0 + smoothAmp * 0.25;
-      const scale = zoomBase * zoomAmp;
-      const persp = 800;
+      const mix = 0.45 + Math.sin(time * 0.04) * 0.2;
+      const timeDrift = Math.sin(time * 0.08) * 0.01;
 
       // --- Compute field ---
       for (let j = 0; j < GRID; j++) {
@@ -255,21 +237,26 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
           const x = (i / (GRID - 1)) * 2 - 1;
           const y = (j / (GRID - 1)) * 2 - 1;
           const dist = Math.sqrt(x * x + y * y);
-
-          if (dist > 1.0) {
-            field[j * GRID + i] = 999;
-            continue;
-          }
-
+          if (dist > 1.0) { field[j * GRID + i] = 999; continue; }
           let val = chladniBlend(x, y, n1 + timeDrift, m1, n2 + timeDrift, m2, modeFrac, mix);
-
-          if (dist > 0.85) {
-            const edge = (dist - 0.85) / 0.15;
-            val *= (1 - edge * edge);
-          }
+          if (dist > 0.85) { const edge = (dist - 0.85) / 0.15; val *= (1 - edge * edge); }
           field[j * GRID + i] = val;
         }
       }
+
+      // --- 3D rotation — wandering, organic ---
+      const radX = Math.sin(time * 0.037) * 0.5 + Math.cos(time * 0.019) * 0.35;
+      const radY = Math.cos(time * 0.029) * 0.45 + Math.sin(time * 0.013) * 0.3;
+      const radZ = Math.sin(time * 0.023) * 0.2 + Math.cos(time * 0.011) * 0.15;
+      const cosX = Math.cos(radX), sinX = Math.sin(radX);
+      const cosY = Math.cos(radY), sinY = Math.sin(radY);
+      const cosZ = Math.cos(radZ), sinZ = Math.sin(radZ);
+
+      // --- Zoom ---
+      const zoomBase = 1.5 + Math.sin(time * 0.019) * 0.15;
+      const zoomAmp = 1.0 + smoothAmp * 0.25;
+      const scale = zoomBase * zoomAmp;
+      const persp = 1200;
 
       // --- Clear with shifting bg ---
       ctx.fillStyle = `rgb(${Math.round(bgColor[0])},${Math.round(bgColor[1])},${Math.round(bgColor[2])})`;
@@ -278,87 +265,52 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
       const cx = W / 2;
       const cy = H / 2;
 
-      // ============================================================
-      // BACKGROUND LAYER — 3x larger, 50% dimmer, different rotation
-      // ============================================================
-      {
-        // Different mode — slower drift, offset pattern
-        const bgModeBase = (Math.sin(time * 0.011 + 2.0) * 0.5 + 0.5) * 6;
-        const bgModeProgress = Math.min(bgModeBase + smoothAmp * (MODES.length - 1) * 0.4, MODES.length - 1.01);
-        const bgModeIdx = Math.min(Math.floor(bgModeProgress), MODES.length - 2);
-        const bgModeFrac = bgModeProgress - bgModeIdx;
-        const [bgN1, bgM1] = MODES[bgModeIdx];
-        const [bgN2, bgM2] = MODES[bgModeIdx + 1];
-        const bgMix = 0.45 + Math.sin(time * 0.04) * 0.2;
-        const bgTimeDrift = Math.sin(time * 0.08) * 0.01;
-
-        // Compute background field
-        for (let j = 0; j < BG_GRID; j++) {
-          for (let i = 0; i < BG_GRID; i++) {
-            const x = (i / (BG_GRID - 1)) * 2 - 1;
-            const y = (j / (BG_GRID - 1)) * 2 - 1;
-            const dist = Math.sqrt(x * x + y * y);
-            if (dist > 1.0) { bgField[j * BG_GRID + i] = 999; continue; }
-            let val = chladniBlend(x, y, bgN1 + bgTimeDrift, bgM1, bgN2 + bgTimeDrift, bgM2, bgModeFrac, bgMix);
-            if (dist > 0.85) { const edge = (dist - 0.85) / 0.15; val *= (1 - edge * edge); }
-            bgField[j * BG_GRID + i] = val;
-          }
-        }
-
-        // Independent rotation — slower, different phase, wandering
-        const bgRadX = Math.sin(time * 0.037) * 0.5 + Math.cos(time * 0.019) * 0.35;
-        const bgRadY = Math.cos(time * 0.029) * 0.45 + Math.sin(time * 0.013) * 0.3;
-        const bgRadZ = Math.sin(time * 0.023) * 0.2 + Math.cos(time * 0.011) * 0.15;
-        const bgCosX = Math.cos(bgRadX), bgSinX = Math.sin(bgRadX);
-        const bgCosY = Math.cos(bgRadY), bgSinY = Math.sin(bgRadY);
-        const bgCosZ = Math.cos(bgRadZ), bgSinZ = Math.sin(bgRadZ);
-
-        // 3x the foreground plate size
-        const bgPlateSize = Math.min(W, H) * 1.25 * 3;
-        const bgOffX = (W - bgPlateSize) / 2;
-        const bgOffY = (H - bgPlateSize) / 2;
-        const bgCellW = bgPlateSize / (BG_GRID - 1);
-        const bgCellH = bgPlateSize / (BG_GRID - 1);
-        const bgScale = scale * 0.9; // slightly less zoom than foreground
-        const bgPersp = 1200; // deeper perspective for more subtle distortion
-
-        const bgAlpha = (0.5 + smoothAmp * 0.4) * 0.5; // 50% of foreground intensity
-
-        const bgSegs0 = marchingSquares(bgField, BG_GRID, BG_GRID, 0);
-        drawSegments3D(bgSegs0, primary, 0.35 * bgAlpha, 0.8, bgOffX, bgOffY, bgCellW, bgCellH, cx, cy, bgCosX, bgSinX, bgCosY, bgSinY, bgCosZ, bgSinZ, bgScale, bgPersp);
-
-        const bgSegs1 = marchingSquares(bgField, BG_GRID, BG_GRID, 0.12);
-        drawSegments3D(bgSegs1, secondary, 0.12 * bgAlpha, 0.4, bgOffX, bgOffY, bgCellW, bgCellH, cx, cy, bgCosX, bgSinX, bgCosY, bgSinY, bgCosZ, bgSinZ, bgScale, bgPersp);
-        const bgSegs2 = marchingSquares(bgField, BG_GRID, BG_GRID, -0.12);
-        drawSegments3D(bgSegs2, secondary, 0.12 * bgAlpha, 0.4, bgOffX, bgOffY, bgCellW, bgCellH, cx, cy, bgCosX, bgSinX, bgCosY, bgSinY, bgCosZ, bgSinZ, bgScale, bgPersp);
-      }
-
-      // ============================================================
-      // FOREGROUND LAYER — original
-      // ============================================================
-      const plateSize = Math.min(W, H) * 1.25;
+      // --- Draw cymatics (large plate, 3x viewport) ---
+      const plateSize = Math.min(W, H) * 3.75;
       const offX = (W - plateSize) / 2;
       const offY = (H - plateSize) / 2;
       const cellW = plateSize / (GRID - 1);
       const cellH = plateSize / (GRID - 1);
 
       const ampAlpha = 0.5 + smoothAmp * 0.4;
+      const brightness = 0.75; // 50% brighter than the old 0.5
 
       // Primary nodal lines
       const segs0 = marchingSquares(field, GRID, GRID, 0);
-      drawSegments3D(segs0, primary, 0.35 * ampAlpha, 1.0, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
+      drawSegments3D(segs0, primary, 0.35 * ampAlpha * brightness, 0.8, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
 
       // Secondary
       const segs1 = marchingSquares(field, GRID, GRID, 0.12);
-      drawSegments3D(segs1, secondary, 0.12 * ampAlpha, 0.5, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
+      drawSegments3D(segs1, secondary, 0.12 * ampAlpha * brightness, 0.5, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
       const segs2 = marchingSquares(field, GRID, GRID, -0.12);
-      drawSegments3D(segs2, secondary, 0.12 * ampAlpha, 0.5, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
+      drawSegments3D(segs2, secondary, 0.12 * ampAlpha * brightness, 0.5, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
 
       // Faint tertiary
       const segs3 = marchingSquares(field, GRID, GRID, 0.3);
-      drawSegments3D(segs3, secondary, 0.04 * ampAlpha, 0.3, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
+      drawSegments3D(segs3, secondary, 0.04 * ampAlpha * brightness, 0.3, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
       const segs4 = marchingSquares(field, GRID, GRID, -0.3);
-      drawSegments3D(segs4, secondary, 0.04 * ampAlpha, 0.3, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
+      drawSegments3D(segs4, secondary, 0.04 * ampAlpha * brightness, 0.3, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
+
+      // --- Rotating gradient overlay ---
+      // Subtle hue-shifting gradient that rotates over the whole scene
+      const gradAngle = time * 12; // ~30s full rotation
+      const gradR = Math.max(W, H) * 0.9;
+      // Use the song's line color shifted slightly for the gradient tints
+      const tintA = `rgba(${Math.round(lineColor[0])},${Math.round(lineColor[1])},${Math.round(lineColor[2])},0.06)`;
+      const tintB = `rgba(${Math.round(dimColor[0])},${Math.round(dimColor[1])},${Math.round(dimColor[2])},0.04)`;
+
+      if (gradRef.current) {
+        gradRef.current.style.background = `
+          conic-gradient(
+            from ${gradAngle}deg at 50% 50%,
+            ${tintA} 0deg,
+            transparent 90deg,
+            ${tintB} 180deg,
+            transparent 270deg,
+            ${tintA} 360deg
+          )
+        `;
+      }
 
       rafId = requestAnimationFrame(draw);
     };
@@ -415,6 +367,17 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
           }}
         />
       </div>
+      {/* Rotating gradient overlay — subtle hue tint */}
+      <div
+        ref={gradRef}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          pointerEvents: 'none',
+          zIndex: 0,
+          mixBlendMode: 'screen',
+        }}
+      />
     </>
   );
 }
