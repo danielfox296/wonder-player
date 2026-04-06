@@ -351,9 +351,9 @@ function DarkHalo({ children, style }: { children: React.ReactNode; style?: Reac
       {/* Dark glow layer behind content */}
       <div style={{
         position: 'absolute',
-        inset: -40,
+        inset: -80,
         borderRadius: '50%',
-        background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.3) 40%, transparent 70%)',
+        background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.6) 35%, rgba(0,0,0,0.2) 55%, transparent 75%)',
         pointerEvents: 'none',
         zIndex: -1,
       }} />

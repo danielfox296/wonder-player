@@ -233,10 +233,10 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
       const mix = 0.35 + Math.sin(time * 0.07) * 0.15;
       const timeDrift = Math.sin(time * 0.12) * 0.015;
 
-      // --- 3D rotation (in-canvas projection) ---
-      const radX = Math.sin(time * 0.042) * 0.7;
-      const radY = Math.sin(time * 0.028) * 0.6;
-      const radZ = Math.sin(time * 0.021) * 0.26;
+      // --- 3D rotation (in-canvas projection) — fast, all directions ---
+      const radX = Math.sin(time * 0.15) * 0.7 + Math.sin(time * 0.067) * 0.3;
+      const radY = Math.sin(time * 0.12) * 0.65 + Math.cos(time * 0.053) * 0.25;
+      const radZ = Math.sin(time * 0.09) * 0.3 + Math.sin(time * 0.041) * 0.15;
       const cosX = Math.cos(radX), sinX = Math.sin(radX);
       const cosY = Math.cos(radY), sinY = Math.sin(radY);
       const cosZ = Math.cos(radZ), sinZ = Math.sin(radZ);
