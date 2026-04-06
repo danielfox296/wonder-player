@@ -153,13 +153,13 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
       const timeDrift = Math.sin(time * 0.12) * 0.015;
 
       // --- 3D orientation: slow independent rotations on prime-ish periods ---
-      const rotX = Math.sin(time * 0.0139) * 8;   // ~45s period, +-8deg
-      const rotY = Math.sin(time * 0.0094) * 6;   // ~67s period, +-6deg
-      const rotZ = Math.sin(time * 0.0071) * 3;   // ~89s period, +-3deg
+      const rotX = Math.sin(time * 0.0139) * 25;  // ~45s period, +-25deg
+      const rotY = Math.sin(time * 0.0094) * 20;  // ~67s period, +-20deg
+      const rotZ = Math.sin(time * 0.0071) * 8;   // ~89s period, +-8deg
 
-      // --- Zoom: slow breathing + gentle amplitude coupling ---
-      const zoomBase = 1.0 + Math.sin(time * 0.025) * 0.03;  // 0.97–1.03 slow breathe
-      const zoomAmp = 1.0 + smoothAmp * 0.06;                 // up to +6% on loud
+      // --- Zoom: base scale + slow breathing + amplitude coupling ---
+      const zoomBase = 1.35 + Math.sin(time * 0.025) * 0.05;  // 1.30–1.40 slow breathe
+      const zoomAmp = 1.0 + smoothAmp * 0.08;                  // up to +8% on loud
       const zoom = zoomBase * zoomAmp;
 
       // Apply 3D transform to wrapper
