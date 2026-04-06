@@ -7,7 +7,6 @@ interface VisualizationProps {
 }
 
 // --- Chladni function ---
-// f(x,y) = sin(n*pi*x)*sin(m*pi*y) +/- sin(m*pi*x)*sin(n*pi*y)
 function chladni(x: number, y: number, n: number, m: number, mix: number): number {
   const PI = Math.PI;
   const a = Math.sin(n * PI * x) * Math.sin(m * PI * y);
@@ -81,8 +80,42 @@ const MODES: [number, number][] = [
 ];
 
 const GRID = 240;
-const ICE = 'rgba(212,225,229,';
-const ICE_DIM = 'rgba(180,200,210,';
+
+// Color palette for line hue shifting — all cool/icy tones
+const COLORS = [
+  [212, 225, 229],  // ice
+  [180, 210, 225],  // steel blue
+  [195, 215, 210],  // sage ice
+  [170, 195, 220],  // slate blue
+  [200, 220, 230],  // frost
+  [185, 205, 215],  // pewter
+];
+
+// Background color palette — near-black shades
+const BG_COLORS = [
+  [18, 18, 32],   // midnight navy
+  [22, 20, 28],   // deep plum black
+  [16, 22, 30],   // ink blue
+  [20, 18, 24],   // charcoal violet
+  [14, 20, 26],   // abyss blue
+  [24, 20, 22],   // warm black
+];
+
+function lerpColor(a: number[], b: number[], t: number): number[] {
+  return [
+    a[0] + (b[0] - a[0]) * t,
+    a[1] + (b[1] - a[1]) * t,
+    a[2] + (b[2] - a[2]) * t,
+  ];
+}
+
+function colorAt(palette: number[][], progress: number): number[] {
+  const total = palette.length;
+  const idx = Math.floor(progress) % total;
+  const next = (idx + 1) % total;
+  const frac = progress - Math.floor(progress);
+  return lerpColor(palette[idx], palette[next], frac);
+}
 
 export default function Visualization({ getAmplitude, connectAnalyser, getActiveElement }: VisualizationProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -133,12 +166,23 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
       connectAnalyser(getActiveElement());
       const rawAmp = getAmplitude();
       // Extra smoothing for the mode progression
-      smoothAmp += (rawAmp - smoothAmp) * 0.04;
+      smoothAmp += (rawAmp - smoothAmp) * 0.06;
 
-      // --- Mode complexity: amplitude + slow time drift ---
-      // Base drift so pattern always moves, amplitude pushes it further
-      const timeModeBase = (Math.sin(time * 0.018) * 0.5 + 0.5) * 6; // slowly crawl through first 6 modes
-      const ampBoost = smoothAmp * (MODES.length - 1) * 0.5;
+      // --- Color cycling ---
+      // Line color shifts on ~120s cycle, background on ~180s cycle (async)
+      const lineColorProgress = (time * 0.008) % COLORS.length;
+      const bgColorProgress = (time * 0.0055) % BG_COLORS.length;
+      const lineColor = colorAt(COLORS, lineColorProgress);
+      const dimColor = colorAt(COLORS, lineColorProgress + 0.5); // offset for secondary
+      const bgColor = colorAt(BG_COLORS, bgColorProgress);
+
+      const primary = `rgba(${Math.round(lineColor[0])},${Math.round(lineColor[1])},${Math.round(lineColor[2])},`;
+      const secondary = `rgba(${Math.round(dimColor[0])},${Math.round(dimColor[1])},${Math.round(dimColor[2])},`;
+
+      // --- Mode complexity: dramatic amplitude response ---
+      // Base drift through first 8 modes, amplitude can push through the FULL range
+      const timeModeBase = (Math.sin(time * 0.018) * 0.5 + 0.5) * 8;
+      const ampBoost = smoothAmp * (MODES.length - 1) * 0.85; // much more dramatic
       const modeProgress = Math.min(timeModeBase + ampBoost, MODES.length - 1.01);
       const modeIdx = Math.min(Math.floor(modeProgress), MODES.length - 2);
       const modeFrac = modeProgress - modeIdx;
@@ -152,20 +196,20 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
       // Slight time-based drift for life
       const timeDrift = Math.sin(time * 0.12) * 0.015;
 
-      // --- 3D orientation: slow independent rotations on prime-ish periods ---
-      const rotX = Math.sin(time * 0.0139) * 25;  // ~45s period, +-25deg
-      const rotY = Math.sin(time * 0.0094) * 20;  // ~67s period, +-20deg
-      const rotZ = Math.sin(time * 0.0071) * 8;   // ~89s period, +-8deg
+      // --- 3D orientation: 3x faster, deeper angles ---
+      const rotX = Math.sin(time * 0.042) * 40;   // ~15s period, +-40deg
+      const rotY = Math.sin(time * 0.028) * 35;   // ~22s period, +-35deg
+      const rotZ = Math.sin(time * 0.021) * 15;   // ~30s period, +-15deg
 
-      // --- Zoom: base scale + slow breathing + amplitude coupling ---
-      const zoomBase = 1.35 + Math.sin(time * 0.025) * 0.05;  // 1.30–1.40 slow breathe
-      const zoomAmp = 1.0 + smoothAmp * 0.08;                  // up to +8% on loud
+      // --- Zoom: dramatic scaling with breathing + amplitude ---
+      const zoomBase = 1.5 + Math.sin(time * 0.019) * 0.15;   // 1.35–1.65 dramatic breathe
+      const zoomAmp = 1.0 + smoothAmp * 0.25;                  // up to +25% on loud
       const zoom = zoomBase * zoomAmp;
 
       // Apply 3D transform to wrapper
       if (wrapRef.current) {
         wrapRef.current.style.transform =
-          `perspective(1200px) rotateX(${rotX}deg) rotateY(${rotY}deg) rotateZ(${rotZ}deg) scale(${zoom})`;
+          `perspective(900px) rotateX(${rotX}deg) rotateY(${rotY}deg) rotateZ(${rotZ}deg) scale(${zoom})`;
       }
 
       // --- Compute field ---
@@ -191,8 +235,10 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
         }
       }
 
-      // --- Clear ---
-      ctx.clearRect(0, 0, W, H);
+      // --- Clear with shifting background color ---
+      const bg = bgColor;
+      ctx.fillStyle = `rgb(${Math.round(bg[0])},${Math.round(bg[1])},${Math.round(bg[2])})`;
+      ctx.fillRect(0, 0, W, H);
 
       // --- Draw ---
       const plateSize = Math.min(W, H) * 1.25;
@@ -201,31 +247,24 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
       const cellW = plateSize / (GRID - 1);
       const cellH = plateSize / (GRID - 1);
 
-      // Subtle plate boundary
-      ctx.beginPath();
-      ctx.arc(W / 2, H / 2, plateSize * 0.47, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(212,225,229,0.04)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      // Alpha scales gently with amplitude — louder = slightly brighter lines
+      // Alpha scales with amplitude
       const ampAlpha = 0.5 + smoothAmp * 0.4;
 
-      // Primary nodal lines (ice)
+      // Primary nodal lines
       const segs0 = marchingSquares(field, GRID, GRID, 0);
-      drawSegments(segs0, ICE, 0.35 * ampAlpha, 1.0, offX, offY, cellW, cellH);
+      drawSegments(segs0, primary, 0.35 * ampAlpha, 1.0, offX, offY, cellW, cellH);
 
-      // Secondary contour lines (dimmer ice)
+      // Secondary contour lines
       const segs1 = marchingSquares(field, GRID, GRID, 0.12);
-      drawSegments(segs1, ICE_DIM, 0.12 * ampAlpha, 0.5, offX, offY, cellW, cellH);
+      drawSegments(segs1, secondary, 0.12 * ampAlpha, 0.5, offX, offY, cellW, cellH);
       const segs2 = marchingSquares(field, GRID, GRID, -0.12);
-      drawSegments(segs2, ICE_DIM, 0.12 * ampAlpha, 0.5, offX, offY, cellW, cellH);
+      drawSegments(segs2, secondary, 0.12 * ampAlpha, 0.5, offX, offY, cellW, cellH);
 
       // Faint tertiary
       const segs3 = marchingSquares(field, GRID, GRID, 0.3);
-      drawSegments(segs3, ICE_DIM, 0.04 * ampAlpha, 0.3, offX, offY, cellW, cellH);
+      drawSegments(segs3, secondary, 0.04 * ampAlpha, 0.3, offX, offY, cellW, cellH);
       const segs4 = marchingSquares(field, GRID, GRID, -0.3);
-      drawSegments(segs4, ICE_DIM, 0.04 * ampAlpha, 0.3, offX, offY, cellW, cellH);
+      drawSegments(segs4, secondary, 0.04 * ampAlpha, 0.3, offX, offY, cellW, cellH);
 
       rafId = requestAnimationFrame(draw);
     };

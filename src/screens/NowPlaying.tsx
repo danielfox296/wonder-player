@@ -13,6 +13,11 @@ function formatTime(sec: number): string {
   return `${m}:${s < 10 ? '0' : ''}${s}`;
 }
 
+// Broad dark glow — 70% black at center, wide blur
+const darkGlow: React.CSSProperties = {
+  filter: 'drop-shadow(0 0 40px rgba(0,0,0,0.7)) drop-shadow(0 0 80px rgba(0,0,0,0.5))',
+};
+
 export default function NowPlaying() {
   const { currentSong, isPlaying, loaded, loadPlaylist, togglePlayPause, skip, songs, getAudioInfo, getActiveElement, lovedIds, markLoved, activeMode, changeMode } = usePlayer();
   useAmbientMonitor(300000);
@@ -104,8 +109,15 @@ export default function NowPlaying() {
 
       <div style={{ position: 'relative', zIndex: 1, width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
 
+        {/* Header gradient overlay — black at top fading to transparent */}
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: 140,
+          background: 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.5) 50%, rgba(0,0,0,0) 100%)',
+          pointerEvents: 'none', zIndex: 0,
+        }} />
+
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px' }}>
+        <div style={{ position: 'relative', zIndex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '20px 28px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <img
               src="/logo.svg" alt="Entuned"
@@ -145,9 +157,25 @@ export default function NowPlaying() {
             >
               {activeMode}
             </button>
-            <span style={{ fontSize: 20, fontWeight: 300, color: 'rgba(255,255,255,0.65)', letterSpacing: 0.5, textTransform: 'uppercase' }}>
-              {clientName}{clientName && storeName ? ' — ' : ''}{storeName}
-            </span>
+            {/* Client (eyebrow) + Store (name) stacked */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+              {clientName && (
+                <span style={{
+                  fontSize: 9, fontWeight: 500, letterSpacing: 2.5,
+                  color: 'rgba(212,225,229,0.45)', textTransform: 'uppercase',
+                }}>
+                  {clientName}
+                </span>
+              )}
+              {storeName && (
+                <span style={{
+                  fontSize: 10, fontWeight: 300, letterSpacing: 0.5,
+                  color: 'rgba(255,255,255,0.55)', textTransform: 'uppercase',
+                }}>
+                  {storeName}
+                </span>
+              )}
+            </div>
             <div style={{
               width: 5, height: 5, borderRadius: '50%',
               background: online ? '#27ae60' : '#e74c3c',
@@ -159,9 +187,9 @@ export default function NowPlaying() {
         {/* Center content */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', paddingBottom: 40 }}>
 
-          {/* Song title */}
+          {/* Song title with dark glow */}
           {loaded && songs.length === 0 ? (
-            <div style={{ fontSize: 14, fontWeight: 300, color: 'rgba(255,255,255,0.35)', letterSpacing: 2 }}>
+            <div style={{ fontSize: 14, fontWeight: 300, color: 'rgba(255,255,255,0.35)', letterSpacing: 2, ...darkGlow }}>
               NO SONGS AVAILABLE
             </div>
           ) : (
@@ -170,14 +198,15 @@ export default function NowPlaying() {
               color: 'rgba(255,255,255,0.85)', letterSpacing: 8, lineHeight: 1.7,
               textTransform: 'uppercase', textAlign: 'center',
               padding: '0 40px', marginBottom: 64,
+              ...darkGlow,
             }}>
               {currentSong?.title || ''}
             </div>
           )}
 
-          {/* Progress bar */}
+          {/* Progress bar with dark glow */}
           {currentSong && (
-            <div style={{ width: '88%', maxWidth: 540 }}>
+            <div style={{ width: '88%', maxWidth: 540, ...darkGlow }}>
               <div style={{ position: 'relative', height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 3 }}>
                 <div
                   ref={fillRef}
@@ -205,9 +234,9 @@ export default function NowPlaying() {
             </div>
           )}
 
-          {/* Transport: Play + Skip (130% size, 2x border) */}
+          {/* Transport: Play + Skip with dark glow */}
           {currentSong && (
-            <div style={{ display: 'flex', gap: 48, marginTop: 60 }}>
+            <div style={{ display: 'flex', gap: 48, marginTop: 60, ...darkGlow }}>
               <CircleButton onClick={togglePlayPause}>
                 {isPlaying ? (
                   <svg width="36" height="36" viewBox="0 0 28 28">
@@ -228,9 +257,9 @@ export default function NowPlaying() {
             </div>
           )}
 
-          {/* Feedback: Report + Love (larger, brighter, no labels) */}
+          {/* Feedback: Report + Love with dark glow */}
           {currentSong && (
-            <div style={{ display: 'flex', gap: 56, marginTop: 48 }}>
+            <div style={{ display: 'flex', gap: 56, marginTop: 48, ...darkGlow }}>
               <FeedbackButton onClick={handleReportClick} pulse={reportPulse} pulseColor="240,153,123">
                 <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
                   <circle cx="12" cy="12" r="10" stroke={reportPulse ? 'rgba(240,153,123,0.9)' : 'rgba(240,153,123,0.6)'} strokeWidth="1.5" />
