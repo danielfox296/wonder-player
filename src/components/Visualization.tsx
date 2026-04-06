@@ -4,6 +4,7 @@ interface VisualizationProps {
   getAmplitude: () => number;
   connectAnalyser: (el: HTMLAudioElement | null) => void;
   getActiveElement: () => HTMLAudioElement | null;
+  songId: string | null;
 }
 
 // --- Chladni function ---
@@ -81,27 +82,19 @@ const MODES: [number, number][] = [
 
 const GRID = 240;
 
-// Color palette for line hue shifting — all cool/icy tones
-const COLORS = [
-  [212, 225, 229],  // ice
-  [180, 210, 225],  // steel blue
-  [195, 215, 210],  // sage ice
-  [170, 195, 220],  // slate blue
-  [200, 220, 230],  // frost
-  [185, 205, 215],  // pewter
+// Color combinations: [line primary, line secondary, background]
+const COLOR_COMBOS: [number[], number[], number[]][] = [
+  [[212, 225, 229], [170, 200, 225], [18, 18, 32]],   // ice / steel / midnight navy
+  [[190, 220, 205], [160, 200, 195], [14, 22, 26]],   // sage / sea glass / abyss
+  [[200, 195, 220], [175, 170, 210], [22, 18, 28]],   // lavender / violet / plum black
+  [[220, 210, 195], [200, 185, 170], [24, 20, 18]],   // warm sand / clay / warm black
+  [[180, 210, 230], [155, 190, 215], [12, 18, 28]],   // sky / cerulean / deep ocean
+  [[195, 225, 210], [170, 210, 190], [16, 24, 22]],   // mint / eucalyptus / forest black
+  [[215, 200, 220], [190, 180, 210], [20, 16, 26]],   // thistle / heather / indigo black
+  [[225, 215, 200], [210, 195, 180], [22, 18, 16]],   // linen / driftwood / espresso
 ];
 
-// Background color palette — near-black shades
-const BG_COLORS = [
-  [18, 18, 32],   // midnight navy
-  [22, 20, 28],   // deep plum black
-  [16, 22, 30],   // ink blue
-  [20, 18, 24],   // charcoal violet
-  [14, 20, 26],   // abyss blue
-  [24, 20, 22],   // warm black
-];
-
-function lerpColor(a: number[], b: number[], t: number): number[] {
+function lerpColor3(a: number[], b: number[], t: number): number[] {
   return [
     a[0] + (b[0] - a[0]) * t,
     a[1] + (b[1] - a[1]) * t,
@@ -109,17 +102,22 @@ function lerpColor(a: number[], b: number[], t: number): number[] {
   ];
 }
 
-function colorAt(palette: number[][], progress: number): number[] {
-  const total = palette.length;
-  const idx = Math.floor(progress) % total;
-  const next = (idx + 1) % total;
-  const frac = progress - Math.floor(progress);
-  return lerpColor(palette[idx], palette[next], frac);
+// Simple hash to pick a combo index from song ID
+function hashStr(str: string): number {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
 }
 
-export default function Visualization({ getAmplitude, connectAnalyser, getActiveElement }: VisualizationProps) {
+export default function Visualization({ getAmplitude, connectAnalyser, getActiveElement, songId }: VisualizationProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const bgRef = useRef<HTMLDivElement>(null);
+  const songIdRef = useRef<string | null>(null);
+  const currentComboRef = useRef(0);
+  const targetComboRef = useRef(0);
+  const fadeRef = useRef(1); // 0 = old combo, 1 = target combo
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -142,9 +140,39 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
     resize();
     window.addEventListener('resize', resize);
 
-    const drawSegments = (
+    // 3D projection: rotate point around center, then perspective divide
+    const project = (
+      px: number, py: number, cx: number, cy: number,
+      cosX: number, sinX: number, cosY: number, sinY: number,
+      cosZ: number, sinZ: number, scale: number, persp: number,
+    ): { x: number; y: number } => {
+      let x = (px - cx) * scale;
+      let y = (py - cy) * scale;
+      const z = 0;
+
+      // Rotate Z
+      const xz = x * cosZ - y * sinZ;
+      const yz = x * sinZ + y * cosZ;
+
+      // Rotate X
+      const yx = yz * cosX - z * sinX;
+      const zx = yz * sinX + z * cosX;
+
+      // Rotate Y
+      const xy = xz * cosY + zx * sinY;
+      const zy = -xz * sinY + zx * cosY;
+
+      // Perspective
+      const d = persp / (persp + zy);
+      return { x: cx + xy * d, y: cy + yx * d };
+    };
+
+    const drawSegments3D = (
       segs: Pt[], colorStr: string, alpha: number, lineWidth: number,
       offX: number, offY: number, cellW: number, cellH: number,
+      cx: number, cy: number,
+      cosX: number, sinX: number, cosY: number, sinY: number,
+      cosZ: number, sinZ: number, scale: number, persp: number,
     ) => {
       if (segs.length < 2) return;
       ctx.strokeStyle = colorStr + alpha + ')';
@@ -152,9 +180,10 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
       ctx.lineCap = 'round';
       ctx.beginPath();
       for (let i = 0; i < segs.length; i += 2) {
-        const a = segs[i], b = segs[i + 1];
-        ctx.moveTo(offX + a.x * cellW, offY + a.y * cellH);
-        ctx.lineTo(offX + b.x * cellW, offY + b.y * cellH);
+        const a = project(offX + segs[i].x * cellW, offY + segs[i].y * cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
+        const b = project(offX + segs[i + 1].x * cellW, offY + segs[i + 1].y * cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
       }
       ctx.stroke();
     };
@@ -162,27 +191,38 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
     const draw = () => {
       time += 0.016;
 
-      // Try to keep analyser connected to the active element
       connectAnalyser(getActiveElement());
       const rawAmp = getAmplitude();
-      // Extra smoothing for the mode progression
       smoothAmp += (rawAmp - smoothAmp) * 0.06;
 
-      // --- Color cycling ---
-      // Line color shifts on ~120s cycle, background on ~180s cycle (async)
-      const lineColorProgress = (time * 0.008) % COLORS.length;
-      const bgColorProgress = (time * 0.0055) % BG_COLORS.length;
-      const lineColor = colorAt(COLORS, lineColorProgress);
-      const dimColor = colorAt(COLORS, lineColorProgress + 0.5); // offset for secondary
-      const bgColor = colorAt(BG_COLORS, bgColorProgress);
+      // --- Song-change color fade ---
+      // Fade toward target combo (~3s transition)
+      if (fadeRef.current < 1) {
+        fadeRef.current = Math.min(1, fadeRef.current + 0.005);
+      }
+      const fade = fadeRef.current;
+      const oldCombo = COLOR_COMBOS[currentComboRef.current];
+      const newCombo = COLOR_COMBOS[targetComboRef.current];
+      const lineColor = lerpColor3(oldCombo[0], newCombo[0], fade);
+      const dimColor = lerpColor3(oldCombo[1], newCombo[1], fade);
+      const bgColor = lerpColor3(oldCombo[2], newCombo[2], fade);
+
+      // Once fade is done, update current to target
+      if (fade >= 1) {
+        currentComboRef.current = targetComboRef.current;
+      }
 
       const primary = `rgba(${Math.round(lineColor[0])},${Math.round(lineColor[1])},${Math.round(lineColor[2])},`;
       const secondary = `rgba(${Math.round(dimColor[0])},${Math.round(dimColor[1])},${Math.round(dimColor[2])},`;
 
+      // Update background div to match
+      if (bgRef.current) {
+        bgRef.current.style.backgroundColor = `rgb(${Math.round(bgColor[0])},${Math.round(bgColor[1])},${Math.round(bgColor[2])})`;
+      }
+
       // --- Mode complexity: dramatic amplitude response ---
-      // Base drift through first 8 modes, amplitude can push through the FULL range
       const timeModeBase = (Math.sin(time * 0.018) * 0.5 + 0.5) * 8;
-      const ampBoost = smoothAmp * (MODES.length - 1) * 0.85; // much more dramatic
+      const ampBoost = smoothAmp * (MODES.length - 1) * 0.85;
       const modeProgress = Math.min(timeModeBase + ampBoost, MODES.length - 1.01);
       const modeIdx = Math.min(Math.floor(modeProgress), MODES.length - 2);
       const modeFrac = modeProgress - modeIdx;
@@ -190,27 +230,22 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
       const [n1, m1] = MODES[modeIdx];
       const [n2, m2] = MODES[modeIdx + 1];
 
-      // Mix parameter — slow drift so patterns breathe
       const mix = 0.35 + Math.sin(time * 0.07) * 0.15;
-
-      // Slight time-based drift for life
       const timeDrift = Math.sin(time * 0.12) * 0.015;
 
-      // --- 3D orientation: 3x faster, deeper angles ---
-      const rotX = Math.sin(time * 0.042) * 40;   // ~15s period, +-40deg
-      const rotY = Math.sin(time * 0.028) * 35;   // ~22s period, +-35deg
-      const rotZ = Math.sin(time * 0.021) * 15;   // ~30s period, +-15deg
+      // --- 3D rotation (in-canvas projection) ---
+      const radX = Math.sin(time * 0.042) * 0.7;
+      const radY = Math.sin(time * 0.028) * 0.6;
+      const radZ = Math.sin(time * 0.021) * 0.26;
+      const cosX = Math.cos(radX), sinX = Math.sin(radX);
+      const cosY = Math.cos(radY), sinY = Math.sin(radY);
+      const cosZ = Math.cos(radZ), sinZ = Math.sin(radZ);
 
-      // --- Zoom: dramatic scaling with breathing + amplitude ---
-      const zoomBase = 1.5 + Math.sin(time * 0.019) * 0.15;   // 1.35–1.65 dramatic breathe
-      const zoomAmp = 1.0 + smoothAmp * 0.25;                  // up to +25% on loud
-      const zoom = zoomBase * zoomAmp;
-
-      // Apply 3D transform to wrapper
-      if (wrapRef.current) {
-        wrapRef.current.style.transform =
-          `perspective(900px) rotateX(${rotX}deg) rotateY(${rotY}deg) rotateZ(${rotZ}deg) scale(${zoom})`;
-      }
+      // --- Dramatic zoom ---
+      const zoomBase = 1.5 + Math.sin(time * 0.019) * 0.15;
+      const zoomAmp = 1.0 + smoothAmp * 0.25;
+      const scale = zoomBase * zoomAmp;
+      const persp = 800;
 
       // --- Compute field ---
       for (let j = 0; j < GRID; j++) {
@@ -226,7 +261,6 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
 
           let val = chladniBlend(x, y, n1 + timeDrift, m1, n2 + timeDrift, m2, modeFrac, mix);
 
-          // Soft edge falloff
           if (dist > 0.85) {
             const edge = (dist - 0.85) / 0.15;
             val *= (1 - edge * edge);
@@ -235,36 +269,36 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
         }
       }
 
-      // --- Clear with shifting background color ---
-      const bg = bgColor;
-      ctx.fillStyle = `rgb(${Math.round(bg[0])},${Math.round(bg[1])},${Math.round(bg[2])})`;
+      // --- Clear with shifting bg ---
+      ctx.fillStyle = `rgb(${Math.round(bgColor[0])},${Math.round(bgColor[1])},${Math.round(bgColor[2])})`;
       ctx.fillRect(0, 0, W, H);
 
-      // --- Draw ---
+      // --- Draw with 3D projection ---
       const plateSize = Math.min(W, H) * 1.25;
       const offX = (W - plateSize) / 2;
       const offY = (H - plateSize) / 2;
       const cellW = plateSize / (GRID - 1);
       const cellH = plateSize / (GRID - 1);
+      const cx = W / 2;
+      const cy = H / 2;
 
-      // Alpha scales with amplitude
       const ampAlpha = 0.5 + smoothAmp * 0.4;
 
       // Primary nodal lines
       const segs0 = marchingSquares(field, GRID, GRID, 0);
-      drawSegments(segs0, primary, 0.35 * ampAlpha, 1.0, offX, offY, cellW, cellH);
+      drawSegments3D(segs0, primary, 0.35 * ampAlpha, 1.0, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
 
-      // Secondary contour lines
+      // Secondary
       const segs1 = marchingSquares(field, GRID, GRID, 0.12);
-      drawSegments(segs1, secondary, 0.12 * ampAlpha, 0.5, offX, offY, cellW, cellH);
+      drawSegments3D(segs1, secondary, 0.12 * ampAlpha, 0.5, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
       const segs2 = marchingSquares(field, GRID, GRID, -0.12);
-      drawSegments(segs2, secondary, 0.12 * ampAlpha, 0.5, offX, offY, cellW, cellH);
+      drawSegments3D(segs2, secondary, 0.12 * ampAlpha, 0.5, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
 
       // Faint tertiary
       const segs3 = marchingSquares(field, GRID, GRID, 0.3);
-      drawSegments(segs3, secondary, 0.04 * ampAlpha, 0.3, offX, offY, cellW, cellH);
+      drawSegments3D(segs3, secondary, 0.04 * ampAlpha, 0.3, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
       const segs4 = marchingSquares(field, GRID, GRID, -0.3);
-      drawSegments(segs4, secondary, 0.04 * ampAlpha, 0.3, offX, offY, cellW, cellH);
+      drawSegments3D(segs4, secondary, 0.04 * ampAlpha, 0.3, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
 
       rafId = requestAnimationFrame(draw);
     };
@@ -277,27 +311,50 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
     };
   }, [getAmplitude, connectAnalyser, getActiveElement]);
 
+  // Trigger color fade when songId changes
+  useEffect(() => {
+    if (songId && songId !== songIdRef.current) {
+      songIdRef.current = songId;
+      const newIdx = hashStr(songId) % COLOR_COMBOS.length;
+      if (newIdx !== targetComboRef.current) {
+        currentComboRef.current = targetComboRef.current;
+        targetComboRef.current = newIdx;
+        fadeRef.current = 0; // start fade
+      }
+    }
+  }, [songId]);
+
   return (
-    <div
-      ref={wrapRef}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        pointerEvents: 'none',
-        zIndex: 0,
-        willChange: 'transform',
-      }}
-    >
-      <canvas
-        ref={canvasRef}
+    <>
+      {/* Background div matches canvas bg — no black gaps */}
+      <div
+        ref={bgRef}
         style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          width: '100vw',
-          height: '100vh',
+          position: 'fixed',
+          inset: 0,
+          zIndex: -1,
+          backgroundColor: 'rgb(18,18,32)',
         }}
       />
-    </div>
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          pointerEvents: 'none',
+          zIndex: 0,
+        }}
+      >
+        <canvas
+          ref={canvasRef}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+          }}
+        />
+      </div>
+    </>
   );
 }

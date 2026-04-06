@@ -13,10 +13,7 @@ function formatTime(sec: number): string {
   return `${m}:${s < 10 ? '0' : ''}${s}`;
 }
 
-// Broad dark glow — 70% black at center, wide blur
-const darkGlow: React.CSSProperties = {
-  filter: 'drop-shadow(0 0 40px rgba(0,0,0,0.7)) drop-shadow(0 0 80px rgba(0,0,0,0.5))',
-};
+
 
 export default function NowPlaying() {
   const { currentSong, isPlaying, loaded, loadPlaylist, togglePlayPause, skip, songs, getAudioInfo, getActiveElement, lovedIds, markLoved, activeMode, changeMode } = usePlayer();
@@ -105,7 +102,7 @@ export default function NowPlaying() {
 
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
-      <Visualization getAmplitude={getAmplitude} connectAnalyser={connectIfNeeded} getActiveElement={getActiveElement} />
+      <Visualization getAmplitude={getAmplitude} connectAnalyser={connectIfNeeded} getActiveElement={getActiveElement} songId={currentSong?.id || null} />
 
       <div style={{ position: 'relative', zIndex: 1, width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
 
@@ -187,26 +184,29 @@ export default function NowPlaying() {
         {/* Center content */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', paddingBottom: 40 }}>
 
-          {/* Song title with dark glow */}
+          {/* Song title with dark halo */}
           {loaded && songs.length === 0 ? (
-            <div style={{ fontSize: 14, fontWeight: 300, color: 'rgba(255,255,255,0.35)', letterSpacing: 2, ...darkGlow }}>
-              NO SONGS AVAILABLE
-            </div>
+            <DarkHalo>
+              <div style={{ fontSize: 14, fontWeight: 300, color: 'rgba(255,255,255,0.35)', letterSpacing: 2 }}>
+                NO SONGS AVAILABLE
+              </div>
+            </DarkHalo>
           ) : (
-            <div style={{
-              fontSize: 24, fontWeight: 300,
-              color: 'rgba(255,255,255,0.85)', letterSpacing: 8, lineHeight: 1.7,
-              textTransform: 'uppercase', textAlign: 'center',
-              padding: '0 40px', marginBottom: 64,
-              ...darkGlow,
-            }}>
-              {currentSong?.title || ''}
-            </div>
+            <DarkHalo>
+              <div style={{
+                fontSize: 24, fontWeight: 300,
+                color: 'rgba(255,255,255,0.85)', letterSpacing: 8, lineHeight: 1.7,
+                textTransform: 'uppercase', textAlign: 'center',
+                padding: '0 40px', marginBottom: 64,
+              }}>
+                {currentSong?.title || ''}
+              </div>
+            </DarkHalo>
           )}
 
-          {/* Progress bar with dark glow */}
+          {/* Progress bar with dark halo */}
           {currentSong && (
-            <div style={{ width: '88%', maxWidth: 540, ...darkGlow }}>
+            <DarkHalo style={{ width: '88%', maxWidth: 540 }}>
               <div style={{ position: 'relative', height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 3 }}>
                 <div
                   ref={fillRef}
@@ -231,12 +231,12 @@ export default function NowPlaying() {
                 <span ref={elapsedRef} style={{ fontSize: 10, fontWeight: 200, color: 'rgba(255,255,255,0.3)', letterSpacing: 1, fontVariantNumeric: 'tabular-nums' }}>0:00</span>
                 <span ref={durationRef} style={{ fontSize: 10, fontWeight: 200, color: 'rgba(255,255,255,0.3)', letterSpacing: 1, fontVariantNumeric: 'tabular-nums' }}>{formatTime(currentSong.duration_seconds || 0)}</span>
               </div>
-            </div>
+            </DarkHalo>
           )}
 
-          {/* Transport: Play + Skip with dark glow */}
+          {/* Transport: Play + Skip with dark halo */}
           {currentSong && (
-            <div style={{ display: 'flex', gap: 48, marginTop: 60, ...darkGlow }}>
+            <DarkHalo style={{ display: 'flex', gap: 48, marginTop: 60 }}>
               <CircleButton onClick={togglePlayPause}>
                 {isPlaying ? (
                   <svg width="36" height="36" viewBox="0 0 28 28">
@@ -254,12 +254,12 @@ export default function NowPlaying() {
                   <path d="M4.5 5l10 7-10 7zm12.5 0v14h2.5V5z" fill="rgba(255,255,255,0.9)" />
                 </svg>
               </CircleButton>
-            </div>
+            </DarkHalo>
           )}
 
-          {/* Feedback: Report + Love with dark glow */}
+          {/* Feedback: Report + Love with dark halo */}
           {currentSong && (
-            <div style={{ display: 'flex', gap: 56, marginTop: 48, ...darkGlow }}>
+            <DarkHalo style={{ display: 'flex', gap: 56, marginTop: 48 }}>
               <FeedbackButton onClick={handleReportClick} pulse={reportPulse} pulseColor="240,153,123">
                 <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
                   <circle cx="12" cy="12" r="10" stroke={reportPulse ? 'rgba(240,153,123,0.9)' : 'rgba(240,153,123,0.6)'} strokeWidth="1.5" />
@@ -278,7 +278,7 @@ export default function NowPlaying() {
                   )}
                 </svg>
               </FeedbackButton>
-            </div>
+            </DarkHalo>
           )}
         </div>
       </div>
@@ -342,5 +342,22 @@ function FeedbackButton({ onClick, children, pulse, pulseColor }: { onClick: () 
     >
       {children}
     </button>
+  );
+}
+
+function DarkHalo({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div style={{ position: 'relative', ...style }}>
+      {/* Dark glow layer behind content */}
+      <div style={{
+        position: 'absolute',
+        inset: -40,
+        borderRadius: '50%',
+        background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.3) 40%, transparent 70%)',
+        pointerEvents: 'none',
+        zIndex: -1,
+      }} />
+      {children}
+    </div>
   );
 }

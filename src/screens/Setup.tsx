@@ -44,7 +44,7 @@ export default function Setup() {
 
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
-      <Visualization getAmplitude={noopAmplitude} connectAnalyser={noopConnect} getActiveElement={noopElement} />
+      <Visualization getAmplitude={noopAmplitude} connectAnalyser={noopConnect} getActiveElement={noopElement} songId={null} />
 
       <div style={{
         position: 'relative', zIndex: 1, width: '100%', height: '100%',
