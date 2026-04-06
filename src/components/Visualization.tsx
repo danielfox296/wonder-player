@@ -135,9 +135,11 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
       // Extra smoothing for the mode progression
       smoothAmp += (rawAmp - smoothAmp) * 0.04;
 
-      // --- Amplitude drives mode complexity ---
-      // Quiet music → simple patterns, loud → intricate
-      const modeProgress = smoothAmp * (MODES.length - 1) * 0.65; // cap at ~65% of range for typical music
+      // --- Mode complexity: amplitude + slow time drift ---
+      // Base drift so pattern always moves, amplitude pushes it further
+      const timeModeBase = (Math.sin(time * 0.018) * 0.5 + 0.5) * 6; // slowly crawl through first 6 modes
+      const ampBoost = smoothAmp * (MODES.length - 1) * 0.5;
+      const modeProgress = Math.min(timeModeBase + ampBoost, MODES.length - 1.01);
       const modeIdx = Math.min(Math.floor(modeProgress), MODES.length - 2);
       const modeFrac = modeProgress - modeIdx;
 
@@ -202,28 +204,28 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
       // Subtle plate boundary
       ctx.beginPath();
       ctx.arc(W / 2, H / 2, plateSize * 0.47, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(255,248,240,0.015)';
+      ctx.strokeStyle = 'rgba(212,225,229,0.04)';
       ctx.lineWidth = 1;
       ctx.stroke();
 
       // Alpha scales gently with amplitude — louder = slightly brighter lines
-      const ampAlpha = 0.35 + smoothAmp * 0.25;
+      const ampAlpha = 0.5 + smoothAmp * 0.4;
 
       // Primary nodal lines (ice)
       const segs0 = marchingSquares(field, GRID, GRID, 0);
-      drawSegments(segs0, ICE, 0.22 * ampAlpha, 1.0, offX, offY, cellW, cellH);
+      drawSegments(segs0, ICE, 0.35 * ampAlpha, 1.0, offX, offY, cellW, cellH);
 
       // Secondary contour lines (dimmer ice)
       const segs1 = marchingSquares(field, GRID, GRID, 0.12);
-      drawSegments(segs1, ICE_DIM, 0.08 * ampAlpha, 0.5, offX, offY, cellW, cellH);
+      drawSegments(segs1, ICE_DIM, 0.12 * ampAlpha, 0.5, offX, offY, cellW, cellH);
       const segs2 = marchingSquares(field, GRID, GRID, -0.12);
-      drawSegments(segs2, ICE_DIM, 0.08 * ampAlpha, 0.5, offX, offY, cellW, cellH);
+      drawSegments(segs2, ICE_DIM, 0.12 * ampAlpha, 0.5, offX, offY, cellW, cellH);
 
       // Faint tertiary
       const segs3 = marchingSquares(field, GRID, GRID, 0.3);
-      drawSegments(segs3, ICE_DIM, 0.025 * ampAlpha, 0.3, offX, offY, cellW, cellH);
+      drawSegments(segs3, ICE_DIM, 0.04 * ampAlpha, 0.3, offX, offY, cellW, cellH);
       const segs4 = marchingSquares(field, GRID, GRID, -0.3);
-      drawSegments(segs4, ICE_DIM, 0.025 * ampAlpha, 0.3, offX, offY, cellW, cellH);
+      drawSegments(segs4, ICE_DIM, 0.04 * ampAlpha, 0.3, offX, offY, cellW, cellH);
 
       rafId = requestAnimationFrame(draw);
     };

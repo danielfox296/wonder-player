@@ -287,6 +287,8 @@ export function usePlayer() {
   useEffect(() => {
     audioA.current = new Audio();
     audioB.current = new Audio();
+    audioA.current.crossOrigin = 'anonymous';
+    audioB.current.crossOrigin = 'anonymous';
     audioA.current.preload = 'auto';
     audioB.current.preload = 'auto';
 
