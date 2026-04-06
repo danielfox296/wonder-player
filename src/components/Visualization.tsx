@@ -81,6 +81,7 @@ const MODES: [number, number][] = [
 ];
 
 const GRID = 240;
+const BG_GRID = 160; // coarser grid for background layer (perf)
 
 // Color combinations: [line primary, line secondary, background]
 const COLOR_COMBOS: [number[], number[], number[]][] = [
@@ -123,6 +124,7 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext('2d')!;
     const field = new Float32Array(GRID * GRID);
+    const bgField = new Float32Array(BG_GRID * BG_GRID);
     let time = 0;
     let smoothAmp = 0;
     let rafId: number;
@@ -273,14 +275,72 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
       ctx.fillStyle = `rgb(${Math.round(bgColor[0])},${Math.round(bgColor[1])},${Math.round(bgColor[2])})`;
       ctx.fillRect(0, 0, W, H);
 
-      // --- Draw with 3D projection ---
+      const cx = W / 2;
+      const cy = H / 2;
+
+      // ============================================================
+      // BACKGROUND LAYER — 3x larger, 50% dimmer, different rotation
+      // ============================================================
+      {
+        // Different mode — slower drift, offset pattern
+        const bgModeBase = (Math.sin(time * 0.011 + 2.0) * 0.5 + 0.5) * 6;
+        const bgModeProgress = Math.min(bgModeBase + smoothAmp * (MODES.length - 1) * 0.4, MODES.length - 1.01);
+        const bgModeIdx = Math.min(Math.floor(bgModeProgress), MODES.length - 2);
+        const bgModeFrac = bgModeProgress - bgModeIdx;
+        const [bgN1, bgM1] = MODES[bgModeIdx];
+        const [bgN2, bgM2] = MODES[bgModeIdx + 1];
+        const bgMix = 0.45 + Math.sin(time * 0.04) * 0.2;
+        const bgTimeDrift = Math.sin(time * 0.08) * 0.01;
+
+        // Compute background field
+        for (let j = 0; j < BG_GRID; j++) {
+          for (let i = 0; i < BG_GRID; i++) {
+            const x = (i / (BG_GRID - 1)) * 2 - 1;
+            const y = (j / (BG_GRID - 1)) * 2 - 1;
+            const dist = Math.sqrt(x * x + y * y);
+            if (dist > 1.0) { bgField[j * BG_GRID + i] = 999; continue; }
+            let val = chladniBlend(x, y, bgN1 + bgTimeDrift, bgM1, bgN2 + bgTimeDrift, bgM2, bgModeFrac, bgMix);
+            if (dist > 0.85) { const edge = (dist - 0.85) / 0.15; val *= (1 - edge * edge); }
+            bgField[j * BG_GRID + i] = val;
+          }
+        }
+
+        // Independent rotation — slower, different phase, wandering
+        const bgRadX = Math.sin(time * 0.037) * 0.5 + Math.cos(time * 0.019) * 0.35;
+        const bgRadY = Math.cos(time * 0.029) * 0.45 + Math.sin(time * 0.013) * 0.3;
+        const bgRadZ = Math.sin(time * 0.023) * 0.2 + Math.cos(time * 0.011) * 0.15;
+        const bgCosX = Math.cos(bgRadX), bgSinX = Math.sin(bgRadX);
+        const bgCosY = Math.cos(bgRadY), bgSinY = Math.sin(bgRadY);
+        const bgCosZ = Math.cos(bgRadZ), bgSinZ = Math.sin(bgRadZ);
+
+        // 3x the foreground plate size
+        const bgPlateSize = Math.min(W, H) * 1.25 * 3;
+        const bgOffX = (W - bgPlateSize) / 2;
+        const bgOffY = (H - bgPlateSize) / 2;
+        const bgCellW = bgPlateSize / (BG_GRID - 1);
+        const bgCellH = bgPlateSize / (BG_GRID - 1);
+        const bgScale = scale * 0.9; // slightly less zoom than foreground
+        const bgPersp = 1200; // deeper perspective for more subtle distortion
+
+        const bgAlpha = (0.5 + smoothAmp * 0.4) * 0.5; // 50% of foreground intensity
+
+        const bgSegs0 = marchingSquares(bgField, BG_GRID, BG_GRID, 0);
+        drawSegments3D(bgSegs0, primary, 0.35 * bgAlpha, 0.8, bgOffX, bgOffY, bgCellW, bgCellH, cx, cy, bgCosX, bgSinX, bgCosY, bgSinY, bgCosZ, bgSinZ, bgScale, bgPersp);
+
+        const bgSegs1 = marchingSquares(bgField, BG_GRID, BG_GRID, 0.12);
+        drawSegments3D(bgSegs1, secondary, 0.12 * bgAlpha, 0.4, bgOffX, bgOffY, bgCellW, bgCellH, cx, cy, bgCosX, bgSinX, bgCosY, bgSinY, bgCosZ, bgSinZ, bgScale, bgPersp);
+        const bgSegs2 = marchingSquares(bgField, BG_GRID, BG_GRID, -0.12);
+        drawSegments3D(bgSegs2, secondary, 0.12 * bgAlpha, 0.4, bgOffX, bgOffY, bgCellW, bgCellH, cx, cy, bgCosX, bgSinX, bgCosY, bgSinY, bgCosZ, bgSinZ, bgScale, bgPersp);
+      }
+
+      // ============================================================
+      // FOREGROUND LAYER — original
+      // ============================================================
       const plateSize = Math.min(W, H) * 1.25;
       const offX = (W - plateSize) / 2;
       const offY = (H - plateSize) / 2;
       const cellW = plateSize / (GRID - 1);
       const cellH = plateSize / (GRID - 1);
-      const cx = W / 2;
-      const cy = H / 2;
 
       const ampAlpha = 0.5 + smoothAmp * 0.4;
 
