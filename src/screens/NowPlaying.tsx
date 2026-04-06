@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { usePlayer } from '../hooks/usePlayer.js';
 import { useAmbientMonitor } from '../hooks/useAmbientMonitor.js';
+import { useAudioAnalyser } from '../hooks/useAudioAnalyser.js';
 import Visualization from '../components/Visualization.js';
 import FlagModal from '../components/FlagModal.js';
 import OutcomeModal from '../components/OutcomeModal.js';
@@ -13,8 +14,9 @@ function formatTime(sec: number): string {
 }
 
 export default function NowPlaying() {
-  const { currentSong, isPlaying, loaded, loadPlaylist, togglePlayPause, skip, songs, getAudioInfo, lovedIds, markLoved, activeMode, changeMode } = usePlayer();
+  const { currentSong, isPlaying, loaded, loadPlaylist, togglePlayPause, skip, songs, getAudioInfo, getActiveElement, lovedIds, markLoved, activeMode, changeMode } = usePlayer();
   useAmbientMonitor(300000);
+  const { connectIfNeeded, getAmplitude } = useAudioAnalyser();
   const [showFlag, setShowFlag] = useState(false);
   const [showOutcome, setShowOutcome] = useState(false);
   const [reportPulse, setReportPulse] = useState(false);
@@ -98,7 +100,7 @@ export default function NowPlaying() {
 
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
-      <Visualization />
+      <Visualization getAmplitude={getAmplitude} connectAnalyser={connectIfNeeded} getActiveElement={getActiveElement} />
 
       <div style={{ position: 'relative', zIndex: 1, width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
 
@@ -106,8 +108,8 @@ export default function NowPlaying() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <img
-              src="/logo.png" alt="Entuned"
-              style={{ height: 20, opacity: 1, cursor: 'pointer' }}
+              src="/logo.svg" alt="Entuned"
+              style={{ height: 40, opacity: 1, cursor: 'pointer' }}
               onClick={() => setShowLogout(v => !v)}
             />
             {showLogout && (
@@ -132,18 +134,18 @@ export default function NowPlaying() {
               type="button"
               onClick={() => setShowOutcome(true)}
               style={{
-                background: 'rgba(74,144,164,0.08)', border: '1px solid rgba(74,144,164,0.2)',
+                background: 'rgba(212,225,229,0.08)', border: '1px solid rgba(212,225,229,0.25)',
                 borderRadius: 20, padding: '4px 12px', cursor: 'pointer',
                 fontSize: 10, fontWeight: 400, letterSpacing: 1.5, textTransform: 'uppercase',
-                color: 'rgba(74,144,164,0.7)', transition: 'all 0.2s', outline: 'none',
+                color: 'rgba(212,225,229,0.8)', transition: 'all 0.2s', outline: 'none',
                 fontFamily: "'Inter', sans-serif",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(74,144,164,0.4)'; e.currentTarget.style.color = 'rgba(74,144,164,0.9)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(74,144,164,0.2)'; e.currentTarget.style.color = 'rgba(74,144,164,0.7)'; }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(212,225,229,0.45)'; e.currentTarget.style.color = 'rgba(212,225,229,1)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(212,225,229,0.25)'; e.currentTarget.style.color = 'rgba(212,225,229,0.8)'; }}
             >
               {activeMode}
             </button>
-            <span style={{ fontSize: 20, fontWeight: 300, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.5, textTransform: 'uppercase' }}>
+            <span style={{ fontSize: 20, fontWeight: 300, color: 'rgba(255,255,255,0.65)', letterSpacing: 0.5, textTransform: 'uppercase' }}>
               {clientName}{clientName && storeName ? ' — ' : ''}{storeName}
             </span>
             <div style={{
@@ -165,7 +167,7 @@ export default function NowPlaying() {
           ) : (
             <div style={{
               fontSize: 24, fontWeight: 300,
-              color: 'rgba(255,255,255,0.7)', letterSpacing: 8, lineHeight: 1.7,
+              color: 'rgba(255,255,255,0.85)', letterSpacing: 8, lineHeight: 1.7,
               textTransform: 'uppercase', textAlign: 'center',
               padding: '0 40px', marginBottom: 64,
             }}>
@@ -176,12 +178,12 @@ export default function NowPlaying() {
           {/* Progress bar */}
           {currentSong && (
             <div style={{ width: '88%', maxWidth: 540 }}>
-              <div style={{ position: 'relative', height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3 }}>
+              <div style={{ position: 'relative', height: 6, background: 'rgba(255,255,255,0.08)', borderRadius: 3 }}>
                 <div
                   ref={fillRef}
                   style={{
                     height: 6, borderRadius: 3,
-                    background: 'rgba(74,144,164,0.5)',
+                    background: 'rgba(212,225,229,0.5)',
                     width: '0%',
                   }}
                 />
@@ -191,14 +193,14 @@ export default function NowPlaying() {
                     position: 'absolute', top: -5,
                     left: 'calc(0% - 8px)',
                     width: 16, height: 16, borderRadius: '50%',
-                    background: 'rgba(255,255,255,0.75)',
-                    border: '2px solid rgba(74,144,164,0.55)',
+                    background: 'rgba(255,255,255,0.85)',
+                    border: '2px solid rgba(212,225,229,0.6)',
                   }}
                 />
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 }}>
-                <span ref={elapsedRef} style={{ fontSize: 10, fontWeight: 200, color: 'rgba(255,255,255,0.15)', letterSpacing: 1, fontVariantNumeric: 'tabular-nums' }}>0:00</span>
-                <span ref={durationRef} style={{ fontSize: 10, fontWeight: 200, color: 'rgba(255,255,255,0.15)', letterSpacing: 1, fontVariantNumeric: 'tabular-nums' }}>{formatTime(currentSong.duration_seconds || 0)}</span>
+                <span ref={elapsedRef} style={{ fontSize: 10, fontWeight: 200, color: 'rgba(255,255,255,0.3)', letterSpacing: 1, fontVariantNumeric: 'tabular-nums' }}>0:00</span>
+                <span ref={durationRef} style={{ fontSize: 10, fontWeight: 200, color: 'rgba(255,255,255,0.3)', letterSpacing: 1, fontVariantNumeric: 'tabular-nums' }}>{formatTime(currentSong.duration_seconds || 0)}</span>
               </div>
             </div>
           )}
@@ -209,18 +211,18 @@ export default function NowPlaying() {
               <CircleButton onClick={togglePlayPause}>
                 {isPlaying ? (
                   <svg width="36" height="36" viewBox="0 0 28 28">
-                    <rect x="7" y="5" width="5" height="18" rx="1.5" fill="rgba(255,255,255,0.75)" />
-                    <rect x="16" y="5" width="5" height="18" rx="1.5" fill="rgba(255,255,255,0.75)" />
+                    <rect x="7" y="5" width="5" height="18" rx="1.5" fill="rgba(255,255,255,0.9)" />
+                    <rect x="16" y="5" width="5" height="18" rx="1.5" fill="rgba(255,255,255,0.9)" />
                   </svg>
                 ) : (
                   <svg width="36" height="36" viewBox="0 0 28 28">
-                    <path d="M9 4l12 8-12 8z" fill="rgba(255,255,255,0.75)" />
+                    <path d="M9 4l12 8-12 8z" fill="rgba(255,255,255,0.9)" />
                   </svg>
                 )}
               </CircleButton>
               <CircleButton onClick={skip}>
                 <svg width="34" height="34" viewBox="0 0 24 24">
-                  <path d="M4.5 5l10 7-10 7zm12.5 0v14h2.5V5z" fill="rgba(255,255,255,0.75)" />
+                  <path d="M4.5 5l10 7-10 7zm12.5 0v14h2.5V5z" fill="rgba(255,255,255,0.9)" />
                 </svg>
               </CircleButton>
             </div>
@@ -271,8 +273,8 @@ function CircleButton({ onClick, children }: { onClick: () => void; children: Re
       onPointerEnter={() => setHovered(true)}
       style={{
         width: 104, height: 104, borderRadius: '50%',
-        border: `2px solid ${hovered || pressed ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.15)'}`,
-        background: pressed ? 'rgba(255,255,255,0.12)' : hovered ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)',
+        border: `2px solid ${hovered || pressed ? 'rgba(212,225,229,0.4)' : 'rgba(212,225,229,0.2)'}`,
+        background: pressed ? 'rgba(212,225,229,0.14)' : hovered ? 'rgba(212,225,229,0.1)' : 'rgba(212,225,229,0.05)',
         cursor: 'pointer',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         transition: 'transform 0.12s, border-color 0.3s, background 0.3s',

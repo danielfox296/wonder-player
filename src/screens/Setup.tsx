@@ -3,6 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { setupDevice } from '../lib/api.js';
 import Visualization from '../components/Visualization.js';
 
+const noopAmplitude = () => 0.15; // gentle idle pattern on setup screen
+const noopConnect = () => {};
+const noopElement = () => null;
+
 export default function Setup() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
@@ -34,13 +38,13 @@ export default function Setup() {
 
   const inputStyle: React.CSSProperties = {
     width: '100%', padding: '12px 0', fontSize: 14, fontWeight: 300, fontFamily: "'Inter', sans-serif",
-    color: 'rgba(255,255,255,0.5)', background: 'transparent', border: 'none',
-    borderBottom: '1px solid rgba(255,255,255,0.1)', outline: 'none', letterSpacing: 0.5,
+    color: 'rgba(255,255,255,0.7)', background: 'transparent', border: 'none',
+    borderBottom: '1px solid rgba(255,255,255,0.18)', outline: 'none', letterSpacing: 0.5,
   };
 
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
-      <Visualization />
+      <Visualization getAmplitude={noopAmplitude} connectAnalyser={noopConnect} getActiveElement={noopElement} />
 
       <div style={{
         position: 'relative', zIndex: 1, width: '100%', height: '100%',
@@ -49,7 +53,7 @@ export default function Setup() {
         <div style={{ width: '100%', maxWidth: 320, textAlign: 'center' }} onKeyDown={handleKeyDown}>
           {/* Logo */}
           <div style={{ marginBottom: 48 }}>
-            <img src="/logo.png" alt="Entuned" style={{ height: 24, opacity: 1 }} />
+            <img src="/logo.svg" alt="Entuned" style={{ height: 48, opacity: 1 }} />
           </div>
 
           {/* Email input */}
@@ -84,17 +88,17 @@ export default function Setup() {
             disabled={loading || !email.trim() || !password}
             style={{
               width: '100%', height: 48, borderRadius: 24,
-              border: '1px solid rgba(255,255,255,0.12)',
+              border: '1px solid rgba(212,225,229,0.2)',
               background: 'transparent', cursor: loading ? 'wait' : 'pointer',
               fontSize: 13, fontWeight: 300, letterSpacing: 3,
-              textTransform: 'uppercase', color: 'rgba(255,255,255,0.4)',
+              textTransform: 'uppercase', color: 'rgba(212,225,229,0.6)',
               fontFamily: "'Inter', sans-serif",
               opacity: loading || !email.trim() || !password ? 0.4 : 1,
               transition: 'border-color 0.3s, background 0.3s',
               outline: 'none',
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)'; e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; e.currentTarget.style.background = 'transparent'; }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(212,225,229,0.4)'; e.currentTarget.style.background = 'rgba(212,225,229,0.06)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(212,225,229,0.2)'; e.currentTarget.style.background = 'transparent'; }}
           >
             {loading ? 'CONNECTING...' : 'CONNECT'}
           </button>

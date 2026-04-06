@@ -1,79 +1,262 @@
-export default function Visualization() {
+import { useRef, useEffect } from 'react';
+
+interface VisualizationProps {
+  getAmplitude: () => number;
+  connectAnalyser: (el: HTMLAudioElement | null) => void;
+  getActiveElement: () => HTMLAudioElement | null;
+}
+
+// --- Chladni function ---
+// f(x,y) = sin(n*pi*x)*sin(m*pi*y) +/- sin(m*pi*x)*sin(n*pi*y)
+function chladni(x: number, y: number, n: number, m: number, mix: number): number {
+  const PI = Math.PI;
+  const a = Math.sin(n * PI * x) * Math.sin(m * PI * y);
+  const b = Math.sin(m * PI * x) * Math.sin(n * PI * y);
+  return a * mix + b * (1 - mix);
+}
+
+function chladniBlend(
+  x: number, y: number,
+  n1: number, m1: number,
+  n2: number, m2: number,
+  blend: number, mix: number,
+): number {
+  const v1 = chladni(x, y, n1, m1, mix);
+  const v2 = chladni(x, y, n2, m2, mix);
+  return v1 * (1 - blend) + v2 * blend;
+}
+
+// --- Marching squares ---
+interface Pt { x: number; y: number }
+
+function marchingSquares(field: Float32Array, cols: number, rows: number, threshold: number): Pt[] {
+  const segments: Pt[] = [];
+  for (let j = 0; j < rows - 1; j++) {
+    for (let i = 0; i < cols - 1; i++) {
+      const tl = field[j * cols + i];
+      const tr = field[j * cols + i + 1];
+      const br = field[(j + 1) * cols + i + 1];
+      const bl = field[(j + 1) * cols + i];
+
+      let idx = 0;
+      if (tl > threshold) idx |= 8;
+      if (tr > threshold) idx |= 4;
+      if (br > threshold) idx |= 2;
+      if (bl > threshold) idx |= 1;
+      if (idx === 0 || idx === 15) continue;
+
+      const lerp = (v1: number, v2: number) => {
+        if (Math.abs(v2 - v1) < 0.0001) return 0.5;
+        return (threshold - v1) / (v2 - v1);
+      };
+
+      const top: Pt = { x: i + lerp(tl, tr), y: j };
+      const right: Pt = { x: i + 1, y: j + lerp(tr, br) };
+      const bottom: Pt = { x: i + lerp(bl, br), y: j + 1 };
+      const left: Pt = { x: i, y: j + lerp(tl, bl) };
+
+      switch (idx) {
+        case 1: case 14: segments.push(left, bottom); break;
+        case 2: case 13: segments.push(bottom, right); break;
+        case 3: case 12: segments.push(left, right); break;
+        case 4: case 11: segments.push(top, right); break;
+        case 5: segments.push(top, left); segments.push(bottom, right); break;
+        case 6: case 9: segments.push(top, bottom); break;
+        case 7: case 8: segments.push(top, left); break;
+        case 10: segments.push(top, right); segments.push(bottom, left); break;
+      }
+    }
+  }
+  return segments;
+}
+
+// Mode pairs — low complexity to high
+const MODES: [number, number][] = [
+  [1, 1], [1, 2], [2, 2], [2, 3], [3, 3], [3, 4],
+  [4, 4], [4, 5], [5, 5], [5, 6], [6, 6], [6, 7],
+  [7, 7], [7, 8], [8, 8], [8, 9], [9, 9], [9, 10],
+  [10, 10], [10, 12], [12, 12], [12, 14], [14, 14],
+  [14, 16], [16, 16], [16, 18], [18, 20], [20, 22],
+  [22, 25], [25, 28],
+];
+
+const GRID = 240;
+const ICE = 'rgba(212,225,229,';
+const ICE_DIM = 'rgba(180,200,210,';
+
+export default function Visualization({ getAmplitude, connectAnalyser, getActiveElement }: VisualizationProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current!;
+    const ctx = canvas.getContext('2d')!;
+    const field = new Float32Array(GRID * GRID);
+    let time = 0;
+    let smoothAmp = 0;
+    let rafId: number;
+
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
+    let W: number, H: number;
+
+    const resize = () => {
+      W = window.innerWidth;
+      H = window.innerHeight;
+      canvas.width = W * DPR;
+      canvas.height = H * DPR;
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    };
+    resize();
+    window.addEventListener('resize', resize);
+
+    const drawSegments = (
+      segs: Pt[], colorStr: string, alpha: number, lineWidth: number,
+      offX: number, offY: number, cellW: number, cellH: number,
+    ) => {
+      if (segs.length < 2) return;
+      ctx.strokeStyle = colorStr + alpha + ')';
+      ctx.lineWidth = lineWidth;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (let i = 0; i < segs.length; i += 2) {
+        const a = segs[i], b = segs[i + 1];
+        ctx.moveTo(offX + a.x * cellW, offY + a.y * cellH);
+        ctx.lineTo(offX + b.x * cellW, offY + b.y * cellH);
+      }
+      ctx.stroke();
+    };
+
+    const draw = () => {
+      time += 0.016;
+
+      // Try to keep analyser connected to the active element
+      connectAnalyser(getActiveElement());
+      const rawAmp = getAmplitude();
+      // Extra smoothing for the mode progression
+      smoothAmp += (rawAmp - smoothAmp) * 0.04;
+
+      // --- Amplitude drives mode complexity ---
+      // Quiet music → simple patterns, loud → intricate
+      const modeProgress = smoothAmp * (MODES.length - 1) * 0.65; // cap at ~65% of range for typical music
+      const modeIdx = Math.min(Math.floor(modeProgress), MODES.length - 2);
+      const modeFrac = modeProgress - modeIdx;
+
+      const [n1, m1] = MODES[modeIdx];
+      const [n2, m2] = MODES[modeIdx + 1];
+
+      // Mix parameter — slow drift so patterns breathe
+      const mix = 0.35 + Math.sin(time * 0.07) * 0.15;
+
+      // Slight time-based drift for life
+      const timeDrift = Math.sin(time * 0.12) * 0.015;
+
+      // --- 3D orientation: slow independent rotations on prime-ish periods ---
+      const rotX = Math.sin(time * 0.0139) * 8;   // ~45s period, +-8deg
+      const rotY = Math.sin(time * 0.0094) * 6;   // ~67s period, +-6deg
+      const rotZ = Math.sin(time * 0.0071) * 3;   // ~89s period, +-3deg
+
+      // --- Zoom: slow breathing + gentle amplitude coupling ---
+      const zoomBase = 1.0 + Math.sin(time * 0.025) * 0.03;  // 0.97–1.03 slow breathe
+      const zoomAmp = 1.0 + smoothAmp * 0.06;                 // up to +6% on loud
+      const zoom = zoomBase * zoomAmp;
+
+      // Apply 3D transform to wrapper
+      if (wrapRef.current) {
+        wrapRef.current.style.transform =
+          `perspective(1200px) rotateX(${rotX}deg) rotateY(${rotY}deg) rotateZ(${rotZ}deg) scale(${zoom})`;
+      }
+
+      // --- Compute field ---
+      for (let j = 0; j < GRID; j++) {
+        for (let i = 0; i < GRID; i++) {
+          const x = (i / (GRID - 1)) * 2 - 1;
+          const y = (j / (GRID - 1)) * 2 - 1;
+          const dist = Math.sqrt(x * x + y * y);
+
+          if (dist > 1.0) {
+            field[j * GRID + i] = 999;
+            continue;
+          }
+
+          let val = chladniBlend(x, y, n1 + timeDrift, m1, n2 + timeDrift, m2, modeFrac, mix);
+
+          // Soft edge falloff
+          if (dist > 0.85) {
+            const edge = (dist - 0.85) / 0.15;
+            val *= (1 - edge * edge);
+          }
+          field[j * GRID + i] = val;
+        }
+      }
+
+      // --- Clear ---
+      ctx.clearRect(0, 0, W, H);
+
+      // --- Draw ---
+      const plateSize = Math.min(W, H) * 1.25;
+      const offX = (W - plateSize) / 2;
+      const offY = (H - plateSize) / 2;
+      const cellW = plateSize / (GRID - 1);
+      const cellH = plateSize / (GRID - 1);
+
+      // Subtle plate boundary
+      ctx.beginPath();
+      ctx.arc(W / 2, H / 2, plateSize * 0.47, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,248,240,0.015)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Alpha scales gently with amplitude — louder = slightly brighter lines
+      const ampAlpha = 0.35 + smoothAmp * 0.25;
+
+      // Primary nodal lines (ice)
+      const segs0 = marchingSquares(field, GRID, GRID, 0);
+      drawSegments(segs0, ICE, 0.22 * ampAlpha, 1.0, offX, offY, cellW, cellH);
+
+      // Secondary contour lines (dimmer ice)
+      const segs1 = marchingSquares(field, GRID, GRID, 0.12);
+      drawSegments(segs1, ICE_DIM, 0.08 * ampAlpha, 0.5, offX, offY, cellW, cellH);
+      const segs2 = marchingSquares(field, GRID, GRID, -0.12);
+      drawSegments(segs2, ICE_DIM, 0.08 * ampAlpha, 0.5, offX, offY, cellW, cellH);
+
+      // Faint tertiary
+      const segs3 = marchingSquares(field, GRID, GRID, 0.3);
+      drawSegments(segs3, ICE_DIM, 0.025 * ampAlpha, 0.3, offX, offY, cellW, cellH);
+      const segs4 = marchingSquares(field, GRID, GRID, -0.3);
+      drawSegments(segs4, ICE_DIM, 0.025 * ampAlpha, 0.3, offX, offY, cellW, cellH);
+
+      rafId = requestAnimationFrame(draw);
+    };
+
+    rafId = requestAnimationFrame(draw);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', resize);
+    };
+  }, [getAmplitude, connectAnalyser, getActiveElement]);
+
   return (
-    <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0 }}>
-      {/* Center glow */}
-      <div style={{
-        position: 'absolute', top: '48%', left: '50%',
-        width: 400, height: 400, marginLeft: -200, marginTop: -200,
-        borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(74,144,164,0.04) 0%, transparent 65%)',
-        animation: 'glow 8s ease-in-out infinite',
-      }} />
-
-      {/* Pulsing ellipses */}
-      <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
-        <ellipse cx="50%" cy="50%" rx="180" ry="60" fill="none" stroke="rgba(74,144,164,0.05)" strokeWidth="0.5" style={{ animation: 'p1 7s ease-in-out infinite' }} />
-        <ellipse cx="50%" cy="50%" rx="250" ry="90" fill="none" stroke="rgba(127,119,221,0.035)" strokeWidth="0.5" style={{ animation: 'p2 9.5s ease-in-out infinite' }} />
-        <ellipse cx="50%" cy="50%" rx="320" ry="120" fill="none" stroke="rgba(93,202,165,0.025)" strokeWidth="0.5" style={{ animation: 'p3 12s ease-in-out infinite' }} />
-        <ellipse cx="50%" cy="50%" rx="390" ry="150" fill="none" stroke="rgba(74,144,164,0.015)" strokeWidth="0.5" style={{ animation: 'p4 16s ease-in-out infinite reverse' }} />
-      </svg>
-
-      {/* Orbital dots */}
-      {/* Orbit 1: 520x190, 55s, teal dots */}
-      <div style={{
-        position: 'absolute', top: '50%', left: '50%',
-        width: 520, height: 190, marginLeft: -260, marginTop: -95,
-        animation: 'orbit 55s linear infinite',
-      }}>
-        <div style={{ position: 'absolute', top: 0, left: '50%', width: 4, height: 4, marginLeft: -2, borderRadius: '50%', background: 'rgba(74,144,164,0.35)', boxShadow: '0 0 6px rgba(74,144,164,0.2)' }} />
-        <div style={{ position: 'absolute', bottom: 0, left: '50%', width: 2, height: 2, marginLeft: -1, borderRadius: '50%', background: 'rgba(74,144,164,0.25)' }} />
-      </div>
-
-      {/* Orbit 2: 420x155, 70s reverse, purple dots */}
-      <div style={{
-        position: 'absolute', top: '50%', left: '50%',
-        width: 420, height: 155, marginLeft: -210, marginTop: -77,
-        animation: 'orbitReverse 70s linear infinite',
-      }}>
-        <div style={{ position: 'absolute', top: 0, left: '25%', width: 3, height: 3, borderRadius: '50%', background: 'rgba(127,119,221,0.3)', boxShadow: '0 0 5px rgba(127,119,221,0.15)' }} />
-        <div style={{ position: 'absolute', bottom: 0, right: '25%', width: 2, height: 2, borderRadius: '50%', background: 'rgba(127,119,221,0.2)' }} />
-      </div>
-
-      {/* Orbit 3: 600x220, 90s, green dots */}
-      <div style={{
-        position: 'absolute', top: '50%', left: '50%',
-        width: 600, height: 220, marginLeft: -300, marginTop: -110,
-        animation: 'orbit 90s linear infinite',
-      }}>
-        <div style={{ position: 'absolute', top: 0, right: '30%', width: 2.5, height: 2.5, borderRadius: '50%', background: 'rgba(93,202,165,0.3)', boxShadow: '0 0 4px rgba(93,202,165,0.15)' }} />
-        <div style={{ position: 'absolute', bottom: 0, left: '30%', width: 1.5, height: 1.5, borderRadius: '50%', background: 'rgba(93,202,165,0.2)' }} />
-      </div>
-
-      {/* Wave paths */}
-      <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
-        <path d="M-100 320 C60 285,180 360,340 315 S520 265,680 310 S840 345,960 320" fill="none" stroke="rgba(74,144,164,0.08)" strokeWidth="1.2" style={{ animation: 'f1 14s ease-in-out infinite' }} />
-        <path d="M-100 360 C80 330,200 390,360 350 S540 300,700 345 S860 375,960 360" fill="none" stroke="rgba(127,119,221,0.055)" strokeWidth="0.8" style={{ animation: 'f2 19s ease-in-out infinite' }} />
-        <path d="M-100 400 C100 370,220 420,380 385 S560 340,720 380 S880 410,960 400" fill="none" stroke="rgba(93,202,165,0.045)" strokeWidth="0.7" style={{ animation: 'f3 24s ease-in-out infinite' }} />
-        <path d="M-100 440 C70 415,190 460,350 425 S530 380,690 420 S850 450,960 440" fill="none" stroke="rgba(74,144,164,0.035)" strokeWidth="0.6" style={{ animation: 'f4 28s ease-in-out infinite' }} />
-        <path d="M-100 480 C90 455,210 500,370 465 S550 420,710 460 S870 490,960 480" fill="none" stroke="rgba(127,119,221,0.025)" strokeWidth="0.5" style={{ animation: 'f5 34s ease-in-out infinite' }} />
-        <path d="M-100 520 C60 495,180 540,340 505 S520 460,680 500 S840 530,960 520" fill="none" stroke="rgba(93,202,165,0.02)" strokeWidth="0.5" style={{ animation: 'f1 40s ease-in-out infinite reverse' }} />
-      </svg>
-
-      <style>{`
-        @keyframes glow { 0%,100% { opacity: .03; } 50% { opacity: .08; } }
-        @keyframes p1 { 0%,100% { opacity: .05; } 50% { opacity: .12; } }
-        @keyframes p2 { 0%,100% { opacity: .03; } 50% { opacity: .08; } }
-        @keyframes p3 { 0%,100% { opacity: .04; } 50% { opacity: .1; } }
-        @keyframes p4 { 0%,100% { opacity: .02; } 50% { opacity: .06; } }
-        @keyframes orbit { to { transform: rotate(360deg); } }
-        @keyframes orbitReverse { to { transform: rotate(-360deg); } }
-        @keyframes dp { 0%,100% { opacity: .3; } 50% { opacity: .85; } }
-        @keyframes f1 { 0%,100% { transform: translateY(0) scaleX(1); } 25% { transform: translateY(-12px) scaleX(1.04); } 50% { transform: translateY(5px) scaleX(.96); } 75% { transform: translateY(-7px) scaleX(1.02); } }
-        @keyframes f2 { 0%,100% { transform: translateY(0) scaleX(1); } 30% { transform: translateY(9px) scaleX(.95); } 60% { transform: translateY(-14px) scaleX(1.05); } 85% { transform: translateY(4px) scaleX(1); } }
-        @keyframes f3 { 0%,100% { transform: translateY(0); } 40% { transform: translateY(-16px); } 70% { transform: translateY(7px); } }
-        @keyframes f4 { 0%,100% { transform: translateX(0) translateY(0); } 35% { transform: translateX(12px) translateY(-10px); } 65% { transform: translateX(-10px) translateY(6px); } }
-        @keyframes f5 { 0%,100% { transform: translateY(0) scaleX(1); } 20% { transform: translateY(6px) scaleX(1.02); } 55% { transform: translateY(-11px) scaleX(.97); } 80% { transform: translateY(3px) scaleX(1.01); } }
-      `}</style>
+    <div
+      ref={wrapRef}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        pointerEvents: 'none',
+        zIndex: 0,
+        willChange: 'transform',
+      }}
+    >
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+        }}
+      />
     </div>
   );
 }

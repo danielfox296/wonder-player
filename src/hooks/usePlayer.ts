@@ -93,6 +93,9 @@ export function usePlayer() {
     };
   }, []);
 
+  // Expose active audio element for Web Audio analyser connection
+  const getActiveElement = useCallback((): HTMLAudioElement | null => getActive(), []);
+
   // Fetch next song: try mode-aware API first, fall back to queue
   const fetchNextSong = async (): Promise<Song | null> => {
     try {
@@ -374,5 +377,5 @@ export function usePlayer() {
     });
   }, []);
 
-  return { currentSong, isPlaying, songs, loaded, loadPlaylist, togglePlayPause, skip, getAudioInfo, lovedIds, markLoved, activeMode, changeMode };
+  return { currentSong, isPlaying, songs, loaded, loadPlaylist, togglePlayPause, skip, getAudioInfo, getActiveElement, lovedIds, markLoved, activeMode, changeMode };
 }
