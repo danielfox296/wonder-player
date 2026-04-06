@@ -275,29 +275,17 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
       const ampAlpha = 0.5 + smoothAmp * 0.4;
       const brightness = 0.75; // 50% brighter than the old 0.5
 
-      // Primary nodal lines
+      // Primary nodal lines only (no secondary/tertiary — they cause glitchy artifacts)
       const segs0 = marchingSquares(field, GRID, GRID, 0);
       drawSegments3D(segs0, primary, 0.35 * ampAlpha * brightness, 0.8, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
-
-      // Secondary
-      const segs1 = marchingSquares(field, GRID, GRID, 0.12);
-      drawSegments3D(segs1, secondary, 0.12 * ampAlpha * brightness, 0.5, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
-      const segs2 = marchingSquares(field, GRID, GRID, -0.12);
-      drawSegments3D(segs2, secondary, 0.12 * ampAlpha * brightness, 0.5, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
-
-      // Faint tertiary
-      const segs3 = marchingSquares(field, GRID, GRID, 0.3);
-      drawSegments3D(segs3, secondary, 0.04 * ampAlpha * brightness, 0.3, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
-      const segs4 = marchingSquares(field, GRID, GRID, -0.3);
-      drawSegments3D(segs4, secondary, 0.04 * ampAlpha * brightness, 0.3, offX, offY, cellW, cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
 
       // --- Rotating gradient overlay ---
       // Subtle hue-shifting gradient that rotates over the whole scene
       const gradAngle = time * 12; // ~30s full rotation
       const gradR = Math.max(W, H) * 0.9;
       // Use the song's line color shifted slightly for the gradient tints
-      const tintA = `rgba(${Math.round(lineColor[0])},${Math.round(lineColor[1])},${Math.round(lineColor[2])},0.06)`;
-      const tintB = `rgba(${Math.round(dimColor[0])},${Math.round(dimColor[1])},${Math.round(dimColor[2])},0.04)`;
+      const tintA = `rgba(${Math.round(lineColor[0])},${Math.round(lineColor[1])},${Math.round(lineColor[2])},0.4)`;
+      const tintB = `rgba(${Math.round(dimColor[0])},${Math.round(dimColor[1])},${Math.round(dimColor[2])},0.3)`;
 
       if (gradRef.current) {
         gradRef.current.style.background = `
@@ -375,7 +363,7 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
           inset: 0,
           pointerEvents: 'none',
           zIndex: 0,
-          mixBlendMode: 'screen',
+          mixBlendMode: 'overlay',
         }}
       />
     </>
