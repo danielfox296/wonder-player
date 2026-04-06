@@ -80,7 +80,8 @@ const MODES: [number, number][] = [
   [22, 25], [25, 28],
 ];
 
-const GRID = 200; // single layer grid
+const GRID = 200;
+const MAX_MODE = 20; // cap mode index to avoid overly dense high-frequency patterns
 
 // Color combinations: [line primary, line secondary, background]
 const COLOR_COMBOS: [number[], number[], number[]][] = [
@@ -180,9 +181,13 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
       ctx.lineWidth = lineWidth;
       ctx.lineCap = 'round';
       ctx.beginPath();
+      const minLen = 1.5; // skip segments shorter than this (pixel space) — reduces noise
       for (let i = 0; i < segs.length; i += 2) {
         const a = project(offX + segs[i].x * cellW, offY + segs[i].y * cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
         const b = project(offX + segs[i + 1].x * cellW, offY + segs[i + 1].y * cellH, cx, cy, cosX, sinX, cosY, sinY, cosZ, sinZ, scale, persp);
+        // Filter out tiny projected segments that appear as noise dots
+        const dx = b.x - a.x, dy = b.y - a.y;
+        if (dx * dx + dy * dy < minLen * minLen) continue;
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
       }
@@ -194,7 +199,9 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
 
       connectAnalyser(getActiveElement());
       const rawAmp = getAmplitude();
-      smoothAmp += (rawAmp - smoothAmp) * 0.06;
+      // Slower smoothing to prevent rapid mode jumping that causes glitchy lines
+      const ampRate = rawAmp > smoothAmp ? 0.04 : 0.02;
+      smoothAmp += (rawAmp - smoothAmp) * ampRate;
 
       // --- Song-change color fade ---
       // Fade toward target combo (~3s transition)
@@ -223,13 +230,12 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
 
       // --- Mode complexity: amplitude + drift ---
       const modeBase = (Math.sin(time * 0.011 + 2.0) * 0.5 + 0.5) * 8;
-      const modeProgress = Math.min(modeBase + smoothAmp * (MODES.length - 1) * 0.85, MODES.length - 1.01);
-      const modeIdx = Math.min(Math.floor(modeProgress), MODES.length - 2);
+      const modeProgress = Math.min(modeBase + smoothAmp * MAX_MODE * 0.85, MAX_MODE - 0.01);
+      const modeIdx = Math.min(Math.floor(modeProgress), MAX_MODE - 1);
       const modeFrac = modeProgress - modeIdx;
       const [n1, m1] = MODES[modeIdx];
-      const [n2, m2] = MODES[modeIdx + 1];
+      const [n2, m2] = MODES[Math.min(modeIdx + 1, MODES.length - 1)];
       const mix = 0.45 + Math.sin(time * 0.04) * 0.2;
-      const timeDrift = Math.sin(time * 0.08) * 0.01;
 
       // --- Compute field ---
       for (let j = 0; j < GRID; j++) {
@@ -238,8 +244,9 @@ export default function Visualization({ getAmplitude, connectAnalyser, getActive
           const y = (j / (GRID - 1)) * 2 - 1;
           const dist = Math.sqrt(x * x + y * y);
           if (dist > 1.0) { field[j * GRID + i] = 999; continue; }
-          let val = chladniBlend(x, y, n1 + timeDrift, m1, n2 + timeDrift, m2, modeFrac, mix);
-          if (dist > 0.85) { const edge = (dist - 0.85) / 0.15; val *= (1 - edge * edge); }
+          let val = chladniBlend(x, y, n1, m1, n2, m2, modeFrac, mix);
+          // Smooth edge falloff — start earlier, wider transition
+          if (dist > 0.75) { const edge = (dist - 0.75) / 0.25; val *= (1 - edge * edge); }
           field[j * GRID + i] = val;
         }
       }
