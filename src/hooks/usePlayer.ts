@@ -8,6 +8,20 @@ interface Song {
   duration_seconds: number;
 }
 
+interface Preloaded {
+  song: Song;
+  which: 'A' | 'B';
+}
+
+// Wait for an audio element to be ready to play (or error out)
+const waitCanPlay = (el: HTMLAudioElement): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const onCanPlay = () => { el.removeEventListener('error', onError); resolve(); };
+    const onError = () => { el.removeEventListener('canplay', onCanPlay); reject(new Error('load failed')); };
+    el.addEventListener('canplay', onCanPlay, { once: true });
+    el.addEventListener('error', onError, { once: true });
+  });
+
 export function usePlayer() {
   // Only what the UI needs to re-render — kept minimal
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
@@ -22,8 +36,9 @@ export function usePlayer() {
   const activeRef = useRef<'A' | 'B'>('A');
   const queueRef = useRef<Song[]>([]);
   const allSongsRef = useRef<Song[]>([]);
+  const preloadedRef = useRef<Preloaded | null>(null);
   const crossfadingRef = useRef(false);
-  const fadeTimerRef = useRef<number | null>(null);
+  const fadeRafRef = useRef<number | null>(null);
   const eventIdRef = useRef<string | null>(null);
   const currentSongRef = useRef<Song | null>(null);
   const activeModeRef = useRef<string>(localStorage.getItem('default_mode') || 'linger');
@@ -119,78 +134,129 @@ export function usePlayer() {
     }
   };
 
-  // Stable crossfade — [] deps because it reads refs only, never closes over state
-  // quick=true: 1.5s fade (user skip), quick=false: 3s fade (natural ending)
+  // Preload the next track into the inactive audio element.
+  // Gives us a 1-track buffer so: (a) skips can show the new title and crossfade instantly,
+  // and (b) playback survives brief internet drops.
+  const preloadNext = useCallback(async () => {
+    if (preloadedRef.current) return;
+    if (crossfadingRef.current) return;
+    try {
+      const song = await fetchNextSong();
+      if (!song || !song.audio_url) return;
+      const el = getInactive();
+      if (!el) return;
+      const which: 'A' | 'B' = activeRef.current === 'A' ? 'B' : 'A';
+      el.src = song.audio_url;
+      el.volume = 0;
+      el.load();
+      await waitCanPlay(el);
+      preloadedRef.current = { song, which };
+    } catch (err) {
+      console.warn('[player] preload failed:', err);
+    }
+  }, []);
+
+  // Smooth rAF-based equal-power crossfade.
+  // quick=true: 0.8s (user skip), quick=false: 3s (natural ending)
+  //
+  // Key behavior: the title/current song swaps IMMEDIATELY for instant visual feedback,
+  // then the audio ramp runs underneath. Uses a preloaded track when available so skip
+  // feels instant even on slow networks.
   const crossfadeToNext = useCallback(async (quick = false) => {
     if (crossfadingRef.current) return;
-
     crossfadingRef.current = true;
 
-    const fadeOut = getActive()!;
-    await logPlayEnd(fadeOut.currentTime);
+    const fadeOut = getActive();
 
-    const nextSong = await fetchNextSong();
-    if (!nextSong) {
+    // Resolve next song. Preloaded path is instant; fallback does sync fetch+load.
+    let nextSong: Song | null = null;
+    let fadeIn: HTMLAudioElement | null = null;
+
+    if (preloadedRef.current) {
+      nextSong = preloadedRef.current.song;
+      fadeIn = preloadedRef.current.which === 'A' ? audioA.current : audioB.current;
+      preloadedRef.current = null;
+    } else {
+      nextSong = await fetchNextSong();
+      if (!nextSong || !nextSong.audio_url) {
+        crossfadingRef.current = false;
+        return;
+      }
+      fadeIn = getInactive();
+      if (!fadeIn) {
+        crossfadingRef.current = false;
+        return;
+      }
+      fadeIn.src = nextSong.audio_url;
+      fadeIn.volume = 0;
+      fadeIn.load();
+      try {
+        await waitCanPlay(fadeIn);
+      } catch {
+        console.warn('[player] Failed to load next track, skipping:', nextSong.title);
+        crossfadingRef.current = false;
+        crossfadeToNext(quick);
+        return;
+      }
+    }
+
+    if (!fadeIn || !nextSong) {
       crossfadingRef.current = false;
       return;
     }
 
-    const fadeIn = getInactive()!;
+    // Close out the previous play event (async, non-blocking)
+    if (fadeOut) logPlayEnd(fadeOut.currentTime);
 
-    // Skip tracks with missing audio URLs
-    if (!nextSong.audio_url) {
-      console.warn('[player] Skipping track with no audio URL:', nextSong.title);
-      crossfadingRef.current = false;
-      crossfadeToNext(quick);
-      return;
-    }
-
-    fadeIn.src = nextSong.audio_url;
-    fadeIn.volume = 0;
-    fadeIn.load();
-
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const onCanPlay = () => { fadeIn.removeEventListener('error', onError); resolve(); };
-        const onError = () => { fadeIn.removeEventListener('canplay', onCanPlay); reject(new Error('load failed')); };
-        fadeIn.addEventListener('canplay', onCanPlay, { once: true });
-        fadeIn.addEventListener('error', onError, { once: true });
-      });
-      await fadeIn.play();
-    } catch (err) {
-      console.warn('[player] Failed to play track, skipping:', nextSong.title, err);
-      fadeIn.src = '';
-      crossfadingRef.current = false;
-      // Auto-skip to next track on load/play failure
-      crossfadeToNext(quick);
-      return;
-    }
-
+    // Swap active pointer first, then update UI immediately. This is what gives the user
+    // instant visual feedback on skip — the title changes before the audio finishes ramping.
     activeRef.current = activeRef.current === 'A' ? 'B' : 'A';
     setCurrent(nextSong);
     setIsPlaying(true);
     addToRecentlyPlayed(nextSong.id);
-
     logPlayStart(nextSong.id);
 
-    const totalSteps = quick ? 6 : 30; // 0.6s skip or 3s natural ending
-    let step = 0;
-    if (fadeTimerRef.current) clearInterval(fadeTimerRef.current);
-    fadeTimerRef.current = window.setInterval(() => {
-      step++;
-      const ratio = step / totalSteps;
-      fadeOut.volume = Math.max(0, 1 - ratio);
-      fadeIn.volume = Math.min(1, ratio);
-      if (step >= totalSteps) {
-        clearInterval(fadeTimerRef.current!);
-        fadeTimerRef.current = null;
-        intentionalPauseRef.current = true;
-        fadeOut.pause();
-        fadeOut.src = '';
+    // Ensure volume is 0 before play (some browsers reset after load())
+    fadeIn.volume = 0;
+    try {
+      await fadeIn.play();
+    } catch (err) {
+      console.warn('[player] Failed to play next track:', err);
+      crossfadingRef.current = false;
+      return;
+    }
+
+    // Capture fadeOut's starting volume so a mid-fade skip doesn't cause a volume jump
+    const fadeOutStartVol = fadeOut ? fadeOut.volume : 0;
+
+    // rAF-based equal-power crossfade (sin/cos keeps perceived loudness constant)
+    const duration = quick ? 800 : 3000;
+    const startT = performance.now();
+
+    if (fadeRafRef.current != null) cancelAnimationFrame(fadeRafRef.current);
+
+    const step = (now: number) => {
+      const t = Math.min(1, (now - startT) / duration);
+      const outGain = fadeOutStartVol * Math.cos(t * Math.PI / 2);
+      const inGain = Math.sin(t * Math.PI / 2);
+      if (fadeOut) fadeOut.volume = Math.max(0, Math.min(1, outGain));
+      fadeIn!.volume = Math.max(0, Math.min(1, inGain));
+      if (t >= 1) {
+        if (fadeOut) {
+          intentionalPauseRef.current = true;
+          fadeOut.pause();
+          fadeOut.src = '';
+        }
+        fadeRafRef.current = null;
         crossfadingRef.current = false;
+        // Buffer the next track for smooth playback + internet tolerance
+        preloadNext();
+        return;
       }
-    }, 100);
-  }, []);
+      fadeRafRef.current = requestAnimationFrame(step);
+    };
+    fadeRafRef.current = requestAnimationFrame(step);
+  }, [preloadNext]);
 
   const loadPlaylist = useCallback(async () => {
     try {
@@ -214,15 +280,11 @@ export function usePlayer() {
           el.volume = 1;
           el.load();
           try {
-            await new Promise<void>((resolve, reject) => {
-              const onCanPlay = () => { el.removeEventListener('error', onError); resolve(); };
-              const onError = () => { el.removeEventListener('canplay', onCanPlay); reject(new Error('load failed')); };
-              el.addEventListener('canplay', onCanPlay, { once: true });
-              el.addEventListener('error', onError, { once: true });
-            });
+            await waitCanPlay(el);
             await el.play();
             setCurrent(candidate);
             setIsPlaying(true);
+            addToRecentlyPlayed(candidate.id);
             logPlayStart(candidate.id);
             started = true;
           } catch {
@@ -230,17 +292,20 @@ export function usePlayer() {
             // Don't clear el.src — the track is loaded, just autoplay-blocked.
             // Keeping the src lets togglePlayPause resume it on user tap.
             setCurrent(candidate);
+            addToRecentlyPlayed(candidate.id);
             setIsPlaying(false);
             started = true;
           }
         }
+        // Kick off buffering of the next track immediately
+        preloadNext();
       }
       setLoaded(true);
     } catch (err) {
       console.error('Failed to load playlist:', err);
       setLoaded(true);
     }
-  }, []);
+  }, [preloadNext]);
 
   const togglePlayPause = useCallback(() => {
     const el = getActive();
@@ -273,14 +338,16 @@ export function usePlayer() {
 
   const skip = useCallback(() => {
     // Cancel any in-progress crossfade so skip is always responsive
-    if (fadeTimerRef.current) {
-      clearInterval(fadeTimerRef.current);
-      fadeTimerRef.current = null;
-      const old = getInactive();
-      if (old) { intentionalPauseRef.current = true; old.pause(); old.src = ''; }
+    if (fadeRafRef.current != null) {
+      cancelAnimationFrame(fadeRafRef.current);
+      fadeRafRef.current = null;
+      // Mid-fade, getInactive() is the fading-out track; kill it so the next crossfade
+      // can reuse that slot for the new preload-less load path.
+      const dying = getInactive();
+      if (dying) { intentionalPauseRef.current = true; dying.pause(); dying.src = ''; }
       crossfadingRef.current = false;
     }
-    crossfadeToNext(true); // quick 1.5s fade
+    crossfadeToNext(true); // quick 0.8s fade
   }, [crossfadeToNext]);
 
   // Set up audio elements, ended listeners, and lock screen controls
@@ -352,7 +419,7 @@ export function usePlayer() {
       intentionalPauseRef.current = true;
       audioA.current?.pause();
       audioB.current?.pause();
-      if (fadeTimerRef.current) clearInterval(fadeTimerRef.current);
+      if (fadeRafRef.current != null) cancelAnimationFrame(fadeRafRef.current);
       clearInterval(fadeCheckInterval);
     };
   }, []);

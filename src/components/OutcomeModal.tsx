@@ -31,8 +31,8 @@ export default function OutcomeModal({ activeMode, onSelectMode, onClose }: Outc
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 100,
-        background: 'rgba(0,0,0,0.7)',
-        backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+        background: 'rgba(0,0,0,0.88)',
+        backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: 20,
       }}
@@ -40,25 +40,27 @@ export default function OutcomeModal({ activeMode, onSelectMode, onClose }: Outc
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: '#0c0f1a',
-          border: '1px solid rgba(255,255,255,0.08)',
-          borderRadius: 20, padding: 32,
-          maxWidth: 420, width: '90%',
+          background: '#0a0d15',
+          border: '1px solid rgba(255,255,255,0.18)',
+          borderRadius: 24, padding: 44,
+          maxWidth: 540, width: '94%',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04) inset',
         }}
       >
         <div style={{
-          fontSize: 12, fontWeight: 300,
-          color: 'rgba(255,255,255,0.35)',
-          letterSpacing: 2, textTransform: 'uppercase',
-          marginBottom: 24,
+          fontSize: 13, fontWeight: 500,
+          color: 'rgba(255,255,255,0.75)',
+          letterSpacing: 2.8, textTransform: 'uppercase',
+          marginBottom: 32,
         }}>
           Outcome Mode
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           {modes.map((m) => {
             const isActive = activeMode === m.key;
             const isQueued = queued === m.key;
+            const highlighted = isActive || isQueued;
             return (
               <button
                 key={m.key}
@@ -68,10 +70,14 @@ export default function OutcomeModal({ activeMode, onSelectMode, onClose }: Outc
                   setQueued(m.key);
                 }}
                 style={{
-                  padding: '20px 16px',
-                  border: `1px solid ${isActive || isQueued ? 'rgba(74,144,164,0.4)' : 'rgba(255,255,255,0.06)'}`,
-                  borderRadius: 14,
-                  background: isActive ? 'rgba(74,144,164,0.12)' : isQueued ? 'rgba(74,144,164,0.08)' : 'rgba(255,255,255,0.02)',
+                  padding: '26px 22px',
+                  border: `1.5px solid ${highlighted ? 'rgba(116,192,218,0.85)' : 'rgba(255,255,255,0.22)'}`,
+                  borderRadius: 16,
+                  background: isActive
+                    ? 'rgba(116,192,218,0.22)'
+                    : isQueued
+                      ? 'rgba(116,192,218,0.15)'
+                      : 'rgba(255,255,255,0.05)',
                   cursor: isActive || queued ? 'default' : 'pointer',
                   textAlign: 'left',
                   transition: 'all 0.25s',
@@ -80,16 +86,16 @@ export default function OutcomeModal({ activeMode, onSelectMode, onClose }: Outc
                 }}
               >
                 <div style={{
-                  fontSize: 15, fontWeight: 300, letterSpacing: 1,
-                  color: isActive || isQueued ? 'rgba(74,144,164,0.9)' : 'rgba(255,255,255,0.55)',
-                  marginBottom: 6,
+                  fontSize: 19, fontWeight: 500, letterSpacing: 0.6,
+                  color: highlighted ? 'rgba(190,230,245,1)' : 'rgba(255,255,255,0.98)',
+                  marginBottom: 8,
                 }}>
                   {m.label}
                 </div>
                 <div style={{
-                  fontSize: 11, fontWeight: 300,
-                  color: isActive || isQueued ? 'rgba(74,144,164,0.5)' : 'rgba(255,255,255,0.2)',
-                  lineHeight: 1.4,
+                  fontSize: 13, fontWeight: 400,
+                  color: highlighted ? 'rgba(190,230,245,0.85)' : 'rgba(255,255,255,0.75)',
+                  lineHeight: 1.5,
                 }}>
                   {isQueued ? 'Queued' : m.sublabel}
                 </div>

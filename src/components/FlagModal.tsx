@@ -4,11 +4,12 @@ interface FlagModalProps {
 }
 
 const reasons = [
-  { label: 'Not our vibe', code: 'off_brand' },
-  { label: "Customers don't like it", code: 'customer_complaint' },
-  { label: 'Too loud / intense', code: 'too_loud' },
-  { label: 'Too slow / boring', code: 'too_slow' },
-  { label: 'Inappropriate', code: 'inappropriate' },
+  { label: 'Awkward Lyrics', code: 'awkward_lyrics' },
+  { label: 'Sound Glitches', code: 'sound_glitches' },
+  { label: "Doesn't Fit Brand", code: 'off_brand' },
+  { label: 'Too Intense', code: 'too_intense' },
+  { label: 'Too Boring', code: 'too_boring' },
+  { label: 'Corny / Cliché', code: 'corny' },
 ];
 
 export default function FlagModal({ onSelect, onClose }: FlagModalProps) {

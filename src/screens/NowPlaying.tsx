@@ -1,6 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { usePlayer } from '../hooks/usePlayer.js';
-import { useAmbientMonitor } from '../hooks/useAmbientMonitor.js';
 import { useAudioAnalyser } from '../hooks/useAudioAnalyser.js';
 import Visualization from '../components/Visualization.js';
 import FlagModal from '../components/FlagModal.js';
@@ -17,7 +16,6 @@ function formatTime(sec: number): string {
 
 export default function NowPlaying() {
   const { currentSong, isPlaying, loaded, loadPlaylist, togglePlayPause, skip, songs, getAudioInfo, getActiveElement, lovedIds, markLoved, activeMode, changeMode } = usePlayer();
-  useAmbientMonitor(300000);
   const { connectIfNeeded, getAmplitude } = useAudioAnalyser();
   const [showFlag, setShowFlag] = useState(false);
   const [showOutcome, setShowOutcome] = useState(false);
@@ -115,62 +113,51 @@ export default function NowPlaying() {
 
         {/* Header */}
         <div style={{ position: 'relative', zIndex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '20px 28px' }}>
+          <img src="/logo.svg" alt="Entuned" style={{ height: 40, opacity: 1 }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <img
-              src="/logo.svg" alt="Entuned"
-              style={{ height: 40, opacity: 1, cursor: 'pointer' }}
-              onClick={() => setShowLogout(v => !v)}
-            />
-            {showLogout && (
-              <button
-                type="button"
-                onClick={handleLogout}
-                style={{
-                  fontSize: 10, fontWeight: 300, letterSpacing: 1,
-                  color: 'rgba(240,153,123,0.5)', background: 'none', border: '1px solid rgba(240,153,123,0.2)',
-                  borderRadius: 12, padding: '4px 12px', cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = 'rgba(240,153,123,0.8)'; e.currentTarget.style.borderColor = 'rgba(240,153,123,0.4)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(240,153,123,0.5)'; e.currentTarget.style.borderColor = 'rgba(240,153,123,0.2)'; }}
+            {/* Client (eyebrow) + Store (name) stacked — tap to reveal logout */}
+            <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+              <div
+                onClick={() => setShowLogout(v => !v)}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, cursor: 'pointer', userSelect: 'none' }}
               >
-                DISCONNECT
-              </button>
-            )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button
-              type="button"
-              onClick={() => setShowOutcome(true)}
-              style={{
-                background: 'rgba(212,225,229,0.08)', border: '1px solid rgba(212,225,229,0.25)',
-                borderRadius: 20, padding: '4px 12px', cursor: 'pointer',
-                fontSize: 10, fontWeight: 400, letterSpacing: 1.5, textTransform: 'uppercase',
-                color: 'rgba(212,225,229,0.8)', transition: 'all 0.2s', outline: 'none',
-                fontFamily: "'Inter', sans-serif",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(212,225,229,0.45)'; e.currentTarget.style.color = 'rgba(212,225,229,1)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(212,225,229,0.25)'; e.currentTarget.style.color = 'rgba(212,225,229,0.8)'; }}
-            >
-              {activeMode}
-            </button>
-            {/* Client (eyebrow) + Store (name) stacked */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-              {clientName && (
-                <span style={{
-                  fontSize: 9, fontWeight: 500, letterSpacing: 2.5,
-                  color: 'rgba(212,225,229,0.45)', textTransform: 'uppercase',
-                }}>
-                  {clientName}
-                </span>
-              )}
-              {storeName && (
-                <span style={{
-                  fontSize: 10, fontWeight: 300, letterSpacing: 0.5,
-                  color: 'rgba(255,255,255,0.55)', textTransform: 'uppercase',
-                }}>
-                  {storeName}
-                </span>
+                {clientName && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 500, letterSpacing: 2.5,
+                    color: 'rgba(212,225,229,0.45)', textTransform: 'uppercase',
+                  }}>
+                    {clientName}
+                  </span>
+                )}
+                {storeName && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 300, letterSpacing: 0.5,
+                    color: 'rgba(255,255,255,0.55)', textTransform: 'uppercase',
+                  }}>
+                    {storeName}
+                  </span>
+                )}
+              </div>
+              {showLogout && (
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  style={{
+                    marginTop: 8,
+                    fontSize: 10, fontWeight: 400, letterSpacing: 1.5,
+                    color: 'rgba(240,153,123,0.85)', background: 'rgba(240,153,123,0.06)',
+                    border: '1px solid rgba(240,153,123,0.35)',
+                    borderRadius: 12, padding: '5px 14px', cursor: 'pointer',
+                    fontFamily: "'Inter', sans-serif",
+                    textTransform: 'uppercase',
+                    transition: 'all 0.2s',
+                    outline: 'none',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = 'rgba(240,153,123,1)'; e.currentTarget.style.borderColor = 'rgba(240,153,123,0.6)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(240,153,123,0.85)'; e.currentTarget.style.borderColor = 'rgba(240,153,123,0.35)'; }}
+                >
+                  Logout
+                </button>
               )}
             </div>
             <div style={{
@@ -234,10 +221,17 @@ export default function NowPlaying() {
             </DarkHalo>
           )}
 
-          {/* Transport: Play + Skip with dark halo */}
+          {/* Transport: Outcome + Play + Skip with dark halo */}
           {currentSong && (
-            <DarkHalo style={{ display: 'flex', gap: 48, marginTop: 60 }}>
-              <CircleButton onClick={togglePlayPause}>
+            <DarkHalo style={{ display: 'flex', gap: 36, marginTop: 60, alignItems: 'center' }}>
+              <CircleButton onClick={() => setShowOutcome(true)} ariaLabel={`Outcome mode: ${activeMode}`}>
+                {/* Flag icon — pole with a pennant */}
+                <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
+                  <line x1="6" y1="4" x2="6" y2="22" stroke="rgba(255,255,255,0.9)" strokeWidth="2" strokeLinecap="round" />
+                  <path d="M6 4 L18 4 L16 9 L18 14 L6 14 Z" fill="rgba(255,255,255,0.9)" />
+                </svg>
+              </CircleButton>
+              <CircleButton onClick={togglePlayPause} ariaLabel={isPlaying ? 'Pause' : 'Play'}>
                 {isPlaying ? (
                   <svg width="36" height="36" viewBox="0 0 28 28">
                     <rect x="7" y="5" width="5" height="18" rx="1.5" fill="rgba(255,255,255,0.9)" />
@@ -249,7 +243,7 @@ export default function NowPlaying() {
                   </svg>
                 )}
               </CircleButton>
-              <CircleButton onClick={skip}>
+              <CircleButton onClick={skip} ariaLabel="Skip">
                 <svg width="34" height="34" viewBox="0 0 24 24">
                   <path d="M4.5 5l10 7-10 7zm12.5 0v14h2.5V5z" fill="rgba(255,255,255,0.9)" />
                 </svg>
@@ -289,13 +283,14 @@ export default function NowPlaying() {
   );
 }
 
-function CircleButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+function CircleButton({ onClick, children, ariaLabel }: { onClick: () => void; children: React.ReactNode; ariaLabel?: string }) {
   const [pressed, setPressed] = useState(false);
   const [hovered, setHovered] = useState(false);
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-label={ariaLabel}
       onPointerDown={() => setPressed(true)}
       onPointerUp={() => setPressed(false)}
       onPointerLeave={() => { setPressed(false); setHovered(false); }}
