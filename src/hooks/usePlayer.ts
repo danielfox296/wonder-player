@@ -388,7 +388,27 @@ export function usePlayer() {
 
     // Auto-resume after system interruptions (calls, alarms, Siri, permission dialogs).
     // If our code paused intentionally, intentionalPauseRef is true and we skip.
-    // Otherwise the OS stole audio focus — wait 1s then try to resume.
+    // Otherwise the OS stole audio focus — retry with backoff until we succeed.
+    let resumeTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearResumeTimer = () => { if (resumeTimer != null) { clearTimeout(resumeTimer); resumeTimer = null; } };
+
+    const tryResume = (el: HTMLAudioElement, attempt = 0) => {
+      clearResumeTimer();
+      // Give up after ~30s of retrying (attempts at 1s, 2s, 4s, 8s, 15s)
+      if (attempt > 4) return;
+      // If user paused manually while we were retrying, stop
+      if (el !== getActive() || !el.src || crossfadingRef.current) return;
+      if (!el.paused) return; // already resumed (e.g. lock screen controls)
+
+      el.play()
+        .then(() => { setIsPlaying(true); clearResumeTimer(); })
+        .catch(() => {
+          // Still interrupted — wait longer and retry. Backoff: 1s, 2s, 4s, 8s, 15s
+          const delay = Math.min(15000, 1000 * Math.pow(2, attempt));
+          resumeTimer = setTimeout(() => tryResume(el, attempt + 1), delay);
+        });
+    };
+
     const onExternalPause = (e: Event) => {
       const el = e.target as HTMLAudioElement;
       if (intentionalPauseRef.current) {
@@ -397,14 +417,22 @@ export function usePlayer() {
       }
       // Only auto-resume the active element (not the one fading out)
       if (el !== getActive()) return;
-      setTimeout(() => {
-        if (el.paused && el.src && !crossfadingRef.current) {
-          el.play().then(() => setIsPlaying(true)).catch(() => {});
-        }
-      }, 1000);
+      // Start retry loop after 1s
+      resumeTimer = setTimeout(() => tryResume(el, 0), 1000);
     };
     audioA.current.addEventListener('pause', onExternalPause);
     audioB.current.addEventListener('pause', onExternalPause);
+
+    // When iOS dismisses an alarm/call it returns focus to the app.
+    // This is our best signal that the interruption ended — try to resume immediately.
+    const onFocus = () => {
+      const el = getActive();
+      if (el?.src && el.paused && currentSongRef.current && !intentionalPauseRef.current) {
+        clearResumeTimer();
+        el.play().then(() => setIsPlaying(true)).catch(() => {});
+      }
+    };
+    window.addEventListener('focus', onFocus);
 
     // Resume playback when returning from lock screen / background tab.
     // iOS suspends the page on lock — when it wakes, the audio element is paused
@@ -458,6 +486,8 @@ export function usePlayer() {
 
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('focus', onFocus);
+      clearResumeTimer();
       audioA.current?.removeEventListener('timeupdate', onTimeUpdate);
       audioB.current?.removeEventListener('timeupdate', onTimeUpdate);
       audioA.current?.removeEventListener('ended', onEnded);
