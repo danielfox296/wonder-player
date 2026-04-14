@@ -352,25 +352,34 @@ export function usePlayer() {
 
   // Set up audio elements, ended listeners, and lock screen controls
   useEffect(() => {
+    // Create audio elements AND append to DOM — iOS Safari requires elements
+    // to be in the document for background/lock-screen audio playback.
     audioA.current = new Audio();
     audioB.current = new Audio();
     audioA.current.crossOrigin = 'anonymous';
     audioB.current.crossOrigin = 'anonymous';
     audioA.current.preload = 'auto';
     audioB.current.preload = 'auto';
+    // Appending to DOM is what grants iOS background audio privileges.
+    // Elements are inert (no controls, no layout) — purely for the audio session.
+    document.body.appendChild(audioA.current);
+    document.body.appendChild(audioB.current);
 
-    // Crossfade 3s before song ends for seamless overlap
+    // Use timeupdate to trigger early crossfade — unlike setInterval, timeupdate
+    // fires reliably on iOS even when the page is backgrounded/locked.
     const earlyFadeRef = { triggered: false };
-    const checkEarlyFade = () => {
-      const el = getActive();
-      if (!el || !el.duration || isNaN(el.duration) || crossfadingRef.current || el.paused) return;
+    const onTimeUpdate = (e: Event) => {
+      const el = e.target as HTMLAudioElement;
+      if (el !== getActive()) return;
+      if (!el.duration || isNaN(el.duration) || crossfadingRef.current || el.paused) return;
       if (el.duration - el.currentTime <= 3 && !earlyFadeRef.triggered) {
         earlyFadeRef.triggered = true;
         crossfadeToNext(false); // 3s natural crossfade
       }
       if (el.currentTime < el.duration - 5) earlyFadeRef.triggered = false;
     };
-    const fadeCheckInterval = setInterval(checkEarlyFade, 500);
+    audioA.current.addEventListener('timeupdate', onTimeUpdate);
+    audioB.current.addEventListener('timeupdate', onTimeUpdate);
 
     // Fallback: if song ends without early fade (very short songs)
     const onEnded = () => { if (!crossfadingRef.current) crossfadeToNext(); };
@@ -397,21 +406,60 @@ export function usePlayer() {
     audioA.current.addEventListener('pause', onExternalPause);
     audioB.current.addEventListener('pause', onExternalPause);
 
+    // Resume playback when returning from lock screen / background tab.
+    // iOS suspends the page on lock — when it wakes, the audio element is paused
+    // and any in-progress rAF crossfade is frozen. This handler recovers both.
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      const el = getActive();
+      if (!el?.src) return;
+
+      // If a crossfade was in progress, finish it instantly (rAF was frozen)
+      if (crossfadingRef.current) {
+        if (fadeRafRef.current != null) {
+          cancelAnimationFrame(fadeRafRef.current);
+          fadeRafRef.current = null;
+        }
+        // Snap volumes: active to 1, inactive to 0 and stop
+        el.volume = 1;
+        const dying = getInactive();
+        if (dying) {
+          intentionalPauseRef.current = true;
+          dying.pause();
+          dying.src = '';
+        }
+        crossfadingRef.current = false;
+        preloadNext();
+      }
+
+      // Resume playback if it was playing before lock
+      if (el.paused && currentSongRef.current) {
+        el.play().then(() => setIsPlaying(true)).catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     // Lock screen / notification controls (iOS Safari 15+, Chrome, etc.)
     if ('mediaSession' in navigator) {
       navigator.mediaSession.setActionHandler('play', () => {
-        const el = audioA.current?.paused === false ? audioA.current : audioB.current;
-        if (el?.src) el.play().catch(() => {});
+        const el = getActive();
+        if (el?.src) el.play().then(() => setIsPlaying(true)).catch(() => {});
       });
       navigator.mediaSession.setActionHandler('pause', () => {
-        const el = audioA.current?.paused === false ? audioA.current : audioB.current;
-        intentionalPauseRef.current = true;
-        el?.pause();
+        const el = getActive();
+        if (el) {
+          intentionalPauseRef.current = true;
+          el.pause();
+          setIsPlaying(false);
+        }
       });
       navigator.mediaSession.setActionHandler('nexttrack', () => skip());
     }
 
     return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      audioA.current?.removeEventListener('timeupdate', onTimeUpdate);
+      audioB.current?.removeEventListener('timeupdate', onTimeUpdate);
       audioA.current?.removeEventListener('ended', onEnded);
       audioB.current?.removeEventListener('ended', onEnded);
       audioA.current?.removeEventListener('pause', onExternalPause);
@@ -419,8 +467,10 @@ export function usePlayer() {
       intentionalPauseRef.current = true;
       audioA.current?.pause();
       audioB.current?.pause();
+      // Remove from DOM
+      if (audioA.current?.parentNode) audioA.current.parentNode.removeChild(audioA.current);
+      if (audioB.current?.parentNode) audioB.current.parentNode.removeChild(audioB.current);
       if (fadeRafRef.current != null) cancelAnimationFrame(fadeRafRef.current);
-      clearInterval(fadeCheckInterval);
     };
   }, []);
 
