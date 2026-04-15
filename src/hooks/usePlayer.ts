@@ -79,6 +79,9 @@ export function usePlayer() {
         title: song?.title || 'Untitled',
         artist: localStorage.getItem('store_name') || '',
         album: localStorage.getItem('client_name') || '',
+        artwork: [
+          { src: '/lockscreen-artwork.png', sizes: '512x512', type: 'image/png' },
+        ],
       });
       // Initialize position state so iOS shows the progress bar.
       // Don't set playbackState here — setIsPlaying() handles that correctly
