@@ -25,7 +25,15 @@ const waitCanPlay = (el: HTMLAudioElement): Promise<void> =>
 export function usePlayer() {
   // Only what the UI needs to re-render — kept minimal
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [isPlayingRaw, setIsPlayingRaw] = useState(false);
+
+  // Wrap setIsPlaying so it always syncs the lock screen play/pause button
+  const setIsPlaying = (playing: boolean) => {
+    setIsPlayingRaw(playing);
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+    }
+  };
   const [loaded, setLoaded] = useState(false);
   const [songs, setSongs] = useState<Song[]>([]);
   const [activeMode, setActiveMode] = useState<string>(() => localStorage.getItem('default_mode') || 'linger');
@@ -567,5 +575,5 @@ export function usePlayer() {
     });
   }, []);
 
-  return { currentSong, isPlaying, songs, loaded, loadPlaylist, togglePlayPause, skip, getAudioInfo, getActiveElement, lovedIds, markLoved, activeMode, changeMode };
+  return { currentSong, isPlaying: isPlayingRaw, songs, loaded, loadPlaylist, togglePlayPause, skip, getAudioInfo, getActiveElement, lovedIds, markLoved, activeMode, changeMode };
 }
