@@ -616,6 +616,15 @@ export function usePlayer() {
         }
       });
       navigator.mediaSession.setActionHandler('nexttrack', () => skip());
+      // previoustrack: restart current song (need both next+previous for iOS
+      // to show track buttons instead of 10-second seek buttons)
+      navigator.mediaSession.setActionHandler('previoustrack', () => {
+        const el = getActive();
+        if (el?.src) el.currentTime = 0;
+      });
+      // Disable seek buttons — we want track forward/back, not 10s skip
+      try { navigator.mediaSession.setActionHandler('seekforward', null); } catch { /* unsupported */ }
+      try { navigator.mediaSession.setActionHandler('seekbackward', null); } catch { /* unsupported */ }
       // iOS may send seekto from the lock screen progress bar
       try {
         navigator.mediaSession.setActionHandler('seekto', (details) => {
