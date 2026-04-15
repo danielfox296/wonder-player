@@ -1,20 +1,32 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback } from 'react';
 
 /**
- * Connects a Web Audio AnalyserNode to the active <audio> element.
- * Returns a stable `getAmplitude()` function that returns 0–1 smoothed RMS.
+ * Provides amplitude data for the Chladni visualization.
  *
- * IMPORTANT — iOS audio routing:
- * `createMediaElementSource(el)` routes ALL audio from the element through
- * the AudioContext graph. If the AudioContext suspends (lock screen, background,
- * Bluetooth disconnect), audio goes silent even though the element thinks it's
- * playing. This hook aggressively resumes the AudioContext on every available
- * signal: visibility change, focus, statechange, and every connectIfNeeded call.
+ * On desktop/Chrome: uses Web Audio AnalyserNode for real frequency data.
+ * On iOS/iPadOS:     returns a simulated gentle pulse — NO Web Audio routing.
  *
- * If connection fails (e.g. CORS), falls back gracefully — audio keeps playing
- * and getAmplitude returns 0.
+ * Why: `createMediaElementSource()` hijacks the <audio> element's output and
+ * routes it exclusively through an AudioContext graph. On iOS Safari this causes:
+ *   1. Audio silence on lock screen (AudioContext suspends, pipeline breaks)
+ *   2. Pitch/speed shift on minimize (AudioContext sample rate desyncs from hardware)
+ *   3. Bluetooth disconnect kills audio (same AudioContext suspension)
+ *
+ * For a retail player on iPad + Bluetooth, reliable audio >>> pretty visualizations.
+ * The simulated pulse still drives the Chladni pattern naturally.
  */
+
+// Detect iOS/iPadOS — iPadOS 13+ reports as Mac but has touch
+const isIOS = typeof navigator !== 'undefined' && (
+  /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+);
+
 export function useAudioAnalyser() {
+  // ── iOS: simulated amplitude (no Web Audio) ──────────────────────────
+  const iosPhaseRef = useRef(Math.random() * Math.PI * 2);
+
+  // ── Desktop: real Web Audio analyser ─────────────────────────────────
   const ctxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourcesRef = useRef<WeakMap<HTMLAudioElement, MediaElementAudioSourceNode>>(new WeakMap());
@@ -23,22 +35,19 @@ export function useAudioAnalyser() {
   const smoothRef = useRef(0);
   const failedRef = useRef(false);
 
-  // Resume the AudioContext if it's been suspended by the OS.
-  // Safe to call frequently — it's a no-op when already running.
   const resumeContext = useCallback(() => {
+    if (isIOS) return; // no AudioContext to resume
     const ctx = ctxRef.current;
     if (ctx && ctx.state !== 'running') {
-      console.log('[audio] resuming AudioContext, state was:', ctx.state);
       ctx.resume().catch(() => {});
     }
   }, []);
 
   const connectIfNeeded = useCallback((el: HTMLAudioElement | null) => {
-    if (!el || failedRef.current) return;
+    // On iOS, never create a MediaElementSource — let audio play directly
+    if (isIOS || !el || failedRef.current) return;
 
-    // ALWAYS check AudioContext state, even if the same element is connected.
-    // iOS suspends the context on lock/background — we need to resume it every
-    // time we get a chance (this runs on every rAF frame from Visualization).
+    // Resume if suspended (desktop browsers can suspend too)
     if (ctxRef.current && ctxRef.current.state !== 'running') {
       ctxRef.current.resume().catch(() => {});
     }
@@ -76,7 +85,6 @@ export function useAudioAnalyser() {
         source = ctx.createMediaElementSource(el);
         sourcesRef.current.set(el, source);
       } catch {
-        // Element already owned by another context, or other error — give up
         connectedElRef.current = el;
         return;
       }
@@ -90,45 +98,22 @@ export function useAudioAnalyser() {
     connectedElRef.current = el;
   }, []);
 
-  // Listen for OS-level signals that the AudioContext can run again.
-  // This is independent of usePlayer's recovery — both systems need to recover.
-  useEffect(() => {
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') resumeContext();
-    };
-    const onFocus = () => resumeContext();
-
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    window.addEventListener('focus', onFocus);
-
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, [resumeContext]);
-
-  // Monitor AudioContext state changes — iOS fires 'interrupted' then
-  // eventually allows resume. Auto-retry after a short delay.
-  useEffect(() => {
-    const ctx = ctxRef.current;
-    if (!ctx) return;
-
-    const onStateChange = () => {
-      console.log('[audio] AudioContext state changed to:', ctx.state);
-      if (ctx.state === 'suspended' || (ctx.state as string) === 'interrupted') {
-        // Delay slightly — iOS may not allow immediate resume
-        setTimeout(() => {
-          if (ctx.state !== 'running') {
-            ctx.resume().catch(() => {});
-          }
-        }, 200);
-      }
-    };
-    ctx.addEventListener('statechange', onStateChange);
-    return () => ctx.removeEventListener('statechange', onStateChange);
-  });
-
   const getAmplitude = useCallback((): number => {
+    if (isIOS) {
+      // Gentle organic pulse: layered sine waves at different frequencies
+      // so the Chladni pattern breathes naturally without real audio data.
+      iosPhaseRef.current += 0.016; // ~60fps
+      const t = iosPhaseRef.current;
+      const raw = 0.35
+        + 0.15 * Math.sin(t * 0.7)    // slow breath (~0.11 Hz)
+        + 0.08 * Math.sin(t * 1.9)    // medium drift
+        + 0.04 * Math.sin(t * 4.3);   // subtle shimmer
+      const prev = smoothRef.current;
+      smoothRef.current = prev + (raw - prev) * 0.06;
+      return smoothRef.current;
+    }
+
+    // Desktop: real frequency data
     const analyser = analyserRef.current;
     const data = dataRef.current;
     if (!analyser || !data) return smoothRef.current;
