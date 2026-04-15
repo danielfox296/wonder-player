@@ -78,9 +78,9 @@ export function usePlayer() {
         artist: localStorage.getItem('store_name') || '',
         album: localStorage.getItem('client_name') || '',
       });
-      // Set playback state alongside metadata — iOS needs both together
-      navigator.mediaSession.playbackState = 'playing';
-      // Initialize position state so iOS shows the progress bar + correct controls
+      // Initialize position state so iOS shows the progress bar.
+      // Don't set playbackState here — setIsPlaying() handles that correctly
+      // (setCurrent is also called when autoplay is blocked, i.e. NOT playing).
       if (song?.duration_seconds) {
         try {
           navigator.mediaSession.setPositionState({

@@ -35,14 +35,6 @@ export function useAudioAnalyser() {
   const smoothRef = useRef(0);
   const failedRef = useRef(false);
 
-  const resumeContext = useCallback(() => {
-    if (isIOS) return; // no AudioContext to resume
-    const ctx = ctxRef.current;
-    if (ctx && ctx.state !== 'running') {
-      ctx.resume().catch(() => {});
-    }
-  }, []);
-
   const connectIfNeeded = useCallback((el: HTMLAudioElement | null) => {
     // On iOS, never create a MediaElementSource — let audio play directly
     if (isIOS || !el || failedRef.current) return;
@@ -136,5 +128,5 @@ export function useAudioAnalyser() {
     return smoothRef.current;
   }, []);
 
-  return { connectIfNeeded, getAmplitude, resumeContext };
+  return { connectIfNeeded, getAmplitude };
 }
