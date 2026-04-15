@@ -44,6 +44,7 @@ export function usePlayer() {
   const activeModeRef = useRef<string>(localStorage.getItem('default_mode') || 'linger');
   const recentlyPlayedRef = useRef<string[]>([]);
   const intentionalPauseRef = useRef(false); // true when OUR code pauses (not system interruption)
+  const wasPlayingRef = useRef(false); // true when audio should be playing (tracks user intent across lock/wake)
   const MAX_RECENT = 20;
 
   const getActive = () => activeRef.current === 'A' ? audioA.current : audioB.current;
@@ -213,6 +214,7 @@ export function usePlayer() {
     activeRef.current = activeRef.current === 'A' ? 'B' : 'A';
     setCurrent(nextSong);
     setIsPlaying(true);
+    wasPlayingRef.current = true;
     addToRecentlyPlayed(nextSong.id);
     logPlayStart(nextSong.id);
 
@@ -223,6 +225,21 @@ export function usePlayer() {
     } catch (err) {
       console.warn('[player] Failed to play next track:', err);
       crossfadingRef.current = false;
+      return;
+    }
+
+    // When the page is hidden (locked screen), rAF never fires — do an instant swap
+    // instead of a smooth crossfade. Audio keeps playing; we just skip the volume ramp.
+    if (document.hidden) {
+      console.log('[player] crossfade while hidden — instant swap');
+      fadeIn.volume = 1;
+      if (fadeOut) {
+        intentionalPauseRef.current = true;
+        fadeOut.pause();
+        fadeOut.src = '';
+      }
+      crossfadingRef.current = false;
+      preloadNext();
       return;
     }
 
@@ -284,6 +301,7 @@ export function usePlayer() {
             await el.play();
             setCurrent(candidate);
             setIsPlaying(true);
+            wasPlayingRef.current = true;
             addToRecentlyPlayed(candidate.id);
             logPlayStart(candidate.id);
             started = true;
@@ -313,6 +331,7 @@ export function usePlayer() {
     if (el.paused) {
       el.play().then(() => {
         setIsPlaying(true);
+        wasPlayingRef.current = true;
         if (!eventIdRef.current && currentSongRef.current) {
           logPlayStart(currentSongRef.current.id);
         }
@@ -328,6 +347,7 @@ export function usePlayer() {
         if (step >= fadeSteps) {
           clearInterval(iv);
           intentionalPauseRef.current = true;
+          wasPlayingRef.current = false;
           el.pause();
           el.volume = originalVol;
           setIsPlaying(false);
@@ -395,13 +415,22 @@ export function usePlayer() {
     const tryResume = (el: HTMLAudioElement, attempt = 0) => {
       clearResumeTimer();
       // Give up after ~30s of retrying (attempts at 1s, 2s, 4s, 8s, 15s)
-      if (attempt > 4) return;
+      if (attempt > 4) {
+        console.log('[player] resume gave up after 5 attempts');
+        return;
+      }
       // If user paused manually while we were retrying, stop
       if (el !== getActive() || !el.src || crossfadingRef.current) return;
       if (!el.paused) return; // already resumed (e.g. lock screen controls)
 
+      console.log('[player] resume attempt', attempt);
       el.play()
-        .then(() => { setIsPlaying(true); clearResumeTimer(); })
+        .then(() => {
+          console.log('[player] resume succeeded on attempt', attempt);
+          setIsPlaying(true);
+          wasPlayingRef.current = true;
+          clearResumeTimer();
+        })
         .catch(() => {
           // Still interrupted — wait longer and retry. Backoff: 1s, 2s, 4s, 8s, 15s
           const delay = Math.min(15000, 1000 * Math.pow(2, attempt));
@@ -417,6 +446,7 @@ export function usePlayer() {
       }
       // Only auto-resume the active element (not the one fading out)
       if (el !== getActive()) return;
+      console.log('[player] external pause detected, starting resume loop');
       // Start retry loop after 1s
       resumeTimer = setTimeout(() => tryResume(el, 0), 1000);
     };
@@ -427,7 +457,9 @@ export function usePlayer() {
     // This is our best signal that the interruption ended — try to resume immediately.
     const onFocus = () => {
       const el = getActive();
-      if (el?.src && el.paused && currentSongRef.current && !intentionalPauseRef.current) {
+      if (!el?.src || !wasPlayingRef.current) return;
+      console.log('[player] focus regained, paused:', el.paused);
+      if (el.paused) {
         clearResumeTimer();
         el.play().then(() => setIsPlaying(true)).catch(() => {});
       }
@@ -442,8 +474,11 @@ export function usePlayer() {
       const el = getActive();
       if (!el?.src) return;
 
+      console.log('[player] visibility → visible, paused:', el.paused, 'wasPlaying:', wasPlayingRef.current);
+
       // If a crossfade was in progress, finish it instantly (rAF was frozen)
       if (crossfadingRef.current) {
+        console.log('[player] completing frozen crossfade');
         if (fadeRafRef.current != null) {
           cancelAnimationFrame(fadeRafRef.current);
           fadeRafRef.current = null;
@@ -460,8 +495,8 @@ export function usePlayer() {
         preloadNext();
       }
 
-      // Resume playback if it was playing before lock
-      if (el.paused && currentSongRef.current) {
+      // Resume playback only if the user hadn't manually paused
+      if (el.paused && wasPlayingRef.current) {
         el.play().then(() => setIsPlaying(true)).catch(() => {});
       }
     };
@@ -470,13 +505,19 @@ export function usePlayer() {
     // Lock screen / notification controls (iOS Safari 15+, Chrome, etc.)
     if ('mediaSession' in navigator) {
       navigator.mediaSession.setActionHandler('play', () => {
+        console.log('[player] mediaSession play');
         const el = getActive();
-        if (el?.src) el.play().then(() => setIsPlaying(true)).catch(() => {});
+        if (el?.src) el.play().then(() => {
+          setIsPlaying(true);
+          wasPlayingRef.current = true;
+        }).catch(() => {});
       });
       navigator.mediaSession.setActionHandler('pause', () => {
+        console.log('[player] mediaSession pause');
         const el = getActive();
         if (el) {
           intentionalPauseRef.current = true;
+          wasPlayingRef.current = false;
           el.pause();
           setIsPlaying(false);
         }

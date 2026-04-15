@@ -1,8 +1,15 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 
 /**
  * Connects a Web Audio AnalyserNode to the active <audio> element.
  * Returns a stable `getAmplitude()` function that returns 0–1 smoothed RMS.
+ *
+ * IMPORTANT — iOS audio routing:
+ * `createMediaElementSource(el)` routes ALL audio from the element through
+ * the AudioContext graph. If the AudioContext suspends (lock screen, background,
+ * Bluetooth disconnect), audio goes silent even though the element thinks it's
+ * playing. This hook aggressively resumes the AudioContext on every available
+ * signal: visibility change, focus, statechange, and every connectIfNeeded call.
  *
  * If connection fails (e.g. CORS), falls back gracefully — audio keeps playing
  * and getAmplitude returns 0.
@@ -16,8 +23,27 @@ export function useAudioAnalyser() {
   const smoothRef = useRef(0);
   const failedRef = useRef(false);
 
+  // Resume the AudioContext if it's been suspended by the OS.
+  // Safe to call frequently — it's a no-op when already running.
+  const resumeContext = useCallback(() => {
+    const ctx = ctxRef.current;
+    if (ctx && ctx.state !== 'running') {
+      console.log('[audio] resuming AudioContext, state was:', ctx.state);
+      ctx.resume().catch(() => {});
+    }
+  }, []);
+
   const connectIfNeeded = useCallback((el: HTMLAudioElement | null) => {
     if (!el || failedRef.current) return;
+
+    // ALWAYS check AudioContext state, even if the same element is connected.
+    // iOS suspends the context on lock/background — we need to resume it every
+    // time we get a chance (this runs on every rAF frame from Visualization).
+    if (ctxRef.current && ctxRef.current.state !== 'running') {
+      ctxRef.current.resume().catch(() => {});
+    }
+
+    // Element already wired — nothing else to do
     if (el === connectedElRef.current && ctxRef.current) return;
 
     // Create AudioContext lazily (requires user gesture)
@@ -30,7 +56,7 @@ export function useAudioAnalyser() {
       }
     }
     const ctx = ctxRef.current;
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
 
     // Create analyser once
     if (!analyserRef.current) {
@@ -64,6 +90,44 @@ export function useAudioAnalyser() {
     connectedElRef.current = el;
   }, []);
 
+  // Listen for OS-level signals that the AudioContext can run again.
+  // This is independent of usePlayer's recovery — both systems need to recover.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') resumeContext();
+    };
+    const onFocus = () => resumeContext();
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [resumeContext]);
+
+  // Monitor AudioContext state changes — iOS fires 'interrupted' then
+  // eventually allows resume. Auto-retry after a short delay.
+  useEffect(() => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+
+    const onStateChange = () => {
+      console.log('[audio] AudioContext state changed to:', ctx.state);
+      if (ctx.state === 'suspended' || (ctx.state as string) === 'interrupted') {
+        // Delay slightly — iOS may not allow immediate resume
+        setTimeout(() => {
+          if (ctx.state !== 'running') {
+            ctx.resume().catch(() => {});
+          }
+        }, 200);
+      }
+    };
+    ctx.addEventListener('statechange', onStateChange);
+    return () => ctx.removeEventListener('statechange', onStateChange);
+  });
+
   const getAmplitude = useCallback((): number => {
     const analyser = analyserRef.current;
     const data = dataRef.current;
@@ -87,5 +151,5 @@ export function useAudioAnalyser() {
     return smoothRef.current;
   }, []);
 
-  return { connectIfNeeded, getAmplitude };
+  return { connectIfNeeded, getAmplitude, resumeContext };
 }
