@@ -78,6 +78,18 @@ export function usePlayer() {
         artist: localStorage.getItem('store_name') || '',
         album: localStorage.getItem('client_name') || '',
       });
+      // Set playback state alongside metadata — iOS needs both together
+      navigator.mediaSession.playbackState = 'playing';
+      // Initialize position state so iOS shows the progress bar + correct controls
+      if (song?.duration_seconds) {
+        try {
+          navigator.mediaSession.setPositionState({
+            duration: song.duration_seconds,
+            position: 0,
+            playbackRate: 1,
+          });
+        } catch { /* setPositionState not supported */ }
+      }
     }
   };
 
@@ -393,13 +405,28 @@ export function usePlayer() {
     document.body.appendChild(audioA.current);
     document.body.appendChild(audioB.current);
 
-    // Use timeupdate to trigger early crossfade — unlike setInterval, timeupdate
-    // fires reliably on iOS even when the page is backgrounded/locked.
+    // Use timeupdate for two things:
+    // 1. Trigger early crossfade (fires reliably on iOS even when backgrounded)
+    // 2. Sync position state to lock screen so iOS shows correct play/pause + progress
     const earlyFadeRef = { triggered: false };
     const onTimeUpdate = (e: Event) => {
       const el = e.target as HTMLAudioElement;
       if (el !== getActive()) return;
-      if (!el.duration || isNaN(el.duration) || crossfadingRef.current || el.paused) return;
+      if (!el.duration || isNaN(el.duration)) return;
+
+      // Sync position to lock screen — iOS uses this to show the correct
+      // play/pause button state and progress bar
+      if ('mediaSession' in navigator && navigator.mediaSession.setPositionState) {
+        try {
+          navigator.mediaSession.setPositionState({
+            duration: el.duration,
+            position: Math.min(el.currentTime, el.duration),
+            playbackRate: el.playbackRate,
+          });
+        } catch { /* ignore */ }
+      }
+
+      if (crossfadingRef.current || el.paused) return;
       if (el.duration - el.currentTime <= 3 && !earlyFadeRef.triggered) {
         earlyFadeRef.triggered = true;
         crossfadeToNext(false); // 3s natural crossfade
@@ -531,6 +558,15 @@ export function usePlayer() {
         }
       });
       navigator.mediaSession.setActionHandler('nexttrack', () => skip());
+      // iOS may send seekto from the lock screen progress bar
+      try {
+        navigator.mediaSession.setActionHandler('seekto', (details) => {
+          const el = getActive();
+          if (el?.src && details.seekTime != null) {
+            el.currentTime = details.seekTime;
+          }
+        });
+      } catch { /* seekto not supported */ }
     }
 
     return () => {
