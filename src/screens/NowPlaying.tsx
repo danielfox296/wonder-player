@@ -15,7 +15,7 @@ function formatTime(sec: number): string {
 
 
 export default function NowPlaying() {
-  const { currentSong, isPlaying, loaded, loadPlaylist, togglePlayPause, skip, songs, getAudioInfo, getActiveElement, lovedIds, markLoved, activeMode, changeMode } = usePlayer();
+  const { currentSong, isPlaying, loaded, loadPlaylist, togglePlayPause, skip, songs, getAudioInfo, getActiveElement, lovedIds, markLoved, activeMode, changeMode, networkError } = usePlayer();
   const { connectIfNeeded, getAmplitude } = useAudioAnalyser();
   const [showFlag, setShowFlag] = useState(false);
   const [showOutcome, setShowOutcome] = useState(false);
@@ -219,6 +219,24 @@ export default function NowPlaying() {
                 <span ref={durationRef} style={{ fontSize: 10, fontWeight: 200, color: 'rgba(255,255,255,0.3)', letterSpacing: 1, fontVariantNumeric: 'tabular-nums' }}>{formatTime(currentSong.duration_seconds || 0)}</span>
               </div>
             </DarkHalo>
+          )}
+
+          {/* Network error banner */}
+          {networkError && (
+            <div style={{
+              marginBottom: 24, padding: '10px 24px',
+              background: 'rgba(231,76,60,0.12)',
+              border: '1px solid rgba(231,76,60,0.3)',
+              borderRadius: 12, maxWidth: 440,
+              textAlign: 'center',
+            }}>
+              <span style={{
+                fontSize: 12, fontWeight: 300, letterSpacing: 0.5,
+                color: 'rgba(231,76,60,0.9)', lineHeight: 1.5,
+              }}>
+                {networkError}
+              </span>
+            </div>
           )}
 
           {/* Transport: Outcome + Play + Skip with dark halo */}

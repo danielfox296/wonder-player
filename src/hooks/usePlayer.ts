@@ -26,6 +26,7 @@ export function usePlayer() {
   // Only what the UI needs to re-render — kept minimal
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [isPlayingRaw, setIsPlayingRaw] = useState(false);
+  const [networkError, setNetworkError] = useState<string | null>(null);
 
   // Wrap setIsPlaying so it always syncs the lock screen play/pause button
   const setIsPlaying = (playing: boolean) => {
@@ -53,6 +54,7 @@ export function usePlayer() {
   const recentlyPlayedRef = useRef<string[]>([]);
   const intentionalPauseRef = useRef(false); // true when OUR code pauses (not system interruption)
   const wasPlayingRef = useRef(false); // true when audio should be playing (tracks user intent across lock/wake)
+  const playedSongsRef = useRef<Song[]>([]); // songs that loaded successfully — offline fallback pool
   const MAX_RECENT = 20;
 
   const getActive = () => activeRef.current === 'A' ? audioA.current : audioB.current;
@@ -171,11 +173,32 @@ export function usePlayer() {
       el.volume = 0;
       el.load();
       await waitCanPlay(el);
+      addToPlayedSongs(song);
       preloadedRef.current = { song, which };
     } catch (err) {
       console.warn('[player] preload failed:', err);
     }
   }, []);
+
+  // Add a song to the offline fallback pool (deduped by id)
+  const addToPlayedSongs = (song: Song) => {
+    if (!playedSongsRef.current.some(s => s.id === song.id)) {
+      playedSongsRef.current.push(song);
+    }
+  };
+
+  // Try to load a song into an audio element. Returns true on success.
+  const tryLoadSong = async (song: Song, el: HTMLAudioElement): Promise<boolean> => {
+    el.src = song.audio_url;
+    el.volume = 0;
+    el.load();
+    try {
+      await waitCanPlay(el);
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
   // Smooth rAF-based equal-power crossfade.
   // quick=true: 0.8s (user skip), quick=false: 3s (natural ending)
@@ -189,35 +212,61 @@ export function usePlayer() {
 
     const fadeOut = getActive();
 
-    // Resolve next song. Preloaded path is instant; fallback does sync fetch+load.
+    // Resolve next song. Preloaded path is instant; fallback does fetch+load.
     let nextSong: Song | null = null;
     let fadeIn: HTMLAudioElement | null = null;
+    let loadedFromCache = false;
 
     if (preloadedRef.current) {
       nextSong = preloadedRef.current.song;
       fadeIn = preloadedRef.current.which === 'A' ? audioA.current : audioB.current;
       preloadedRef.current = null;
     } else {
-      nextSong = await fetchNextSong();
-      if (!nextSong || !nextSong.audio_url) {
-        crossfadingRef.current = false;
-        return;
-      }
       fadeIn = getInactive();
       if (!fadeIn) {
         crossfadingRef.current = false;
         return;
       }
-      fadeIn.src = nextSong.audio_url;
-      fadeIn.volume = 0;
-      fadeIn.load();
-      try {
-        await waitCanPlay(fadeIn);
-      } catch {
-        console.warn('[player] Failed to load next track, skipping:', nextSong.title);
+
+      // Try up to 3 songs from the normal path (API → queue fallback)
+      let loaded = false;
+      for (let attempt = 0; attempt < 3 && !loaded; attempt++) {
+        const candidate = await fetchNextSong();
+        if (!candidate || !candidate.audio_url) break;
+        loaded = await tryLoadSong(candidate, fadeIn);
+        if (loaded) {
+          nextSong = candidate;
+        } else {
+          console.warn('[player] Failed to load track (attempt', attempt + 1 + '):', candidate.title);
+        }
+      }
+
+      // All failed — fall back to previously-played songs (browser cache)
+      if (!loaded && playedSongsRef.current.length > 0) {
+        console.log('[player] online load failed, falling back to cached songs');
+        const cached = shuffle(playedSongsRef.current);
+        for (const candidate of cached) {
+          // Skip the currently playing song to avoid repeating it immediately
+          if (candidate.id === currentSongRef.current?.id) continue;
+          loaded = await tryLoadSong(candidate, fadeIn);
+          if (loaded) {
+            nextSong = candidate;
+            loadedFromCache = true;
+            break;
+          }
+        }
+      }
+
+      // Truly nothing works — give up gracefully
+      if (!loaded || !nextSong) {
+        console.log('[player] no tracks available, showing network error');
+        setNetworkError('No internet connection. Music will resume when you\u2019re back online.');
         crossfadingRef.current = false;
-        crossfadeToNext(quick);
         return;
+      }
+
+      if (loadedFromCache) {
+        setNetworkError('No internet connection. Playing from recent tracks.');
       }
     }
 
@@ -225,6 +274,11 @@ export function usePlayer() {
       crossfadingRef.current = false;
       return;
     }
+
+    // Track this song as successfully loaded for future offline fallback
+    addToPlayedSongs(nextSong);
+    // Clear network error on successful load from a non-cache source
+    if (!loadedFromCache) setNetworkError(null);
 
     // Close out the previous play event (async, non-blocking)
     if (fadeOut) logPlayEnd(fadeOut.currentTime);
@@ -322,6 +376,7 @@ export function usePlayer() {
             setCurrent(candidate);
             setIsPlaying(true);
             wasPlayingRef.current = true;
+            addToPlayedSongs(candidate);
             addToRecentlyPlayed(candidate.id);
             logPlayStart(candidate.id);
             started = true;
@@ -569,9 +624,19 @@ export function usePlayer() {
       } catch { /* seekto not supported */ }
     }
 
+    // When connectivity returns, clear error and try to preload a fresh track
+    const onOnline = () => {
+      console.log('[player] connectivity restored');
+      setNetworkError(null);
+      preloadedRef.current = null; // discard any stale preload
+      preloadNext();
+    };
+    window.addEventListener('online', onOnline);
+
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener('online', onOnline);
       clearResumeTimer();
       audioA.current?.removeEventListener('timeupdate', onTimeUpdate);
       audioB.current?.removeEventListener('timeupdate', onTimeUpdate);
@@ -611,5 +676,5 @@ export function usePlayer() {
     });
   }, []);
 
-  return { currentSong, isPlaying: isPlayingRaw, songs, loaded, loadPlaylist, togglePlayPause, skip, getAudioInfo, getActiveElement, lovedIds, markLoved, activeMode, changeMode };
+  return { currentSong, isPlaying: isPlayingRaw, songs, loaded, loadPlaylist, togglePlayPause, skip, getAudioInfo, getActiveElement, lovedIds, markLoved, activeMode, changeMode, networkError };
 }
