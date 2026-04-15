@@ -624,12 +624,48 @@ export function usePlayer() {
       } catch { /* seekto not supported */ }
     }
 
-    // When connectivity returns, clear error and try to preload a fresh track
-    const onOnline = () => {
-      console.log('[player] connectivity restored');
-      setNetworkError(null);
+    // When connectivity returns, verify it works, then seamlessly resume.
+    // If the player was dead-stopped, restart playback automatically.
+    // If playing a cached song, preload a fresh one so the next transition is seamless.
+    const onOnline = async () => {
+      console.log('[player] online event, verifying connectivity...');
       preloadedRef.current = null; // discard any stale preload
-      preloadNext();
+
+      // Verify the connection actually works before clearing the error
+      try {
+        const song = await fetchNextSong();
+        if (!song || !song.audio_url) return;
+
+        // Connection is real — preload this track
+        const el = getInactive();
+        if (el) {
+          el.src = song.audio_url;
+          el.volume = 0;
+          el.load();
+          try {
+            await waitCanPlay(el);
+            const which: 'A' | 'B' = activeRef.current === 'A' ? 'B' : 'A';
+            addToPlayedSongs(song);
+            preloadedRef.current = { song, which };
+            console.log('[player] connectivity confirmed, preloaded:', song.title);
+          } catch {
+            console.warn('[player] online event but audio load failed');
+            return; // connection not really back
+          }
+        }
+
+        setNetworkError(null);
+
+        // If the player was dead-stopped, restart playback automatically
+        const active = getActive();
+        if (active && (!active.src || active.paused) && wasPlayingRef.current) {
+          console.log('[player] restarting playback after reconnect');
+          crossfadeToNext(true);
+        }
+      } catch {
+        console.warn('[player] online event but API still unreachable');
+        // Don't clear error — connection isn't really back
+      }
     };
     window.addEventListener('online', onOnline);
 
