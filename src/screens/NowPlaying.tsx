@@ -15,7 +15,7 @@ function formatTime(sec: number): string {
 
 
 export default function NowPlaying() {
-  const { currentSong, isPlaying, loaded, loadPlaylist, togglePlayPause, skip, songs, getAudioInfo, getActiveElement, lovedIds, markLoved, activeMode, changeMode, networkError } = usePlayer();
+  const { currentSong, isPlaying, loaded, loadPlaylist, togglePlayPause, skip, songs, getAudioInfo, getActiveElement, lovedIds, markLoved, activeMode, changeMode, networkError, streamWindowLabel } = usePlayer();
   const { connectIfNeeded, getAmplitude } = useAudioAnalyser();
   const [showFlag, setShowFlag] = useState(false);
   const [showOutcome, setShowOutcome] = useState(false);
@@ -135,6 +135,16 @@ export default function NowPlaying() {
                     color: 'rgba(255,255,255,0.55)', textTransform: 'uppercase',
                   }}>
                     {storeName}
+                  </span>
+                )}
+                {activeMode && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 500, letterSpacing: 1.8,
+                    color: 'rgba(94,162,182,0.85)', textTransform: 'uppercase',
+                    marginTop: 1,
+                  }}>
+                    Now: {activeMode}
+                    {streamWindowLabel ? ` · ${streamWindowLabel}` : ''}
                   </span>
                 )}
               </div>
