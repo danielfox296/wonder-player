@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { playerApi, getNextTrack, logModeChange } from '../lib/api.js';
+import { playerApi, getNextTrack, logModeChange, getCurrentStream } from '../lib/api.js';
 
 interface Song {
   id: string;
@@ -724,5 +724,32 @@ export function usePlayer() {
     });
   }, []);
 
-  return { currentSong, isPlaying: isPlayingRaw, songs, loaded, loadPlaylist, togglePlayPause, skip, getAudioInfo, getActiveElement, lovedIds, markLoved, activeMode, changeMode, networkError };
+  // v3 — resolve active stream mode from the server's StreamPlan (if configured).
+  // Overrides localStorage default_mode. Polls every 5 minutes plus an immediate
+  // call on mount. On error (no plan, 404, offline) keeps the current mode.
+  const [streamWindowLabel, setStreamWindowLabel] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const resolve = async () => {
+      try {
+        const { data } = await getCurrentStream();
+        if (cancelled) return;
+        if (data.active_mode.slug && data.active_mode.slug !== activeModeRef.current) {
+          activeModeRef.current = data.active_mode.slug;
+          setActiveMode(data.active_mode.slug);
+          // Persist as the new localStorage default so offline boot picks it up
+          localStorage.setItem('default_mode', data.active_mode.slug);
+          logModeChange(activeModeRef.current, data.active_mode.slug).catch(() => {});
+        }
+        setStreamWindowLabel(data.active_window?.label ?? null);
+      } catch {
+        // Silently fall back to current mode — /current-stream is an enhancement, not a requirement.
+      }
+    };
+    void resolve();
+    const interval = setInterval(resolve, 5 * 60 * 1000); // every 5 minutes
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
+  return { currentSong, isPlaying: isPlayingRaw, songs, loaded, loadPlaylist, togglePlayPause, skip, getAudioInfo, getActiveElement, lovedIds, markLoved, activeMode, changeMode, networkError, streamWindowLabel };
 }

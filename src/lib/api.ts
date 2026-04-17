@@ -44,6 +44,22 @@ export async function logModeChange(previousMode: string | null, newMode: string
   });
 }
 
+// v3 — resolve the store's current stream window from StreamPlan + clock.
+// Returns the active mode + optional outcome + the window label. Falls back
+// to the store's default_mode if no plan or no window covers the current moment.
+export async function getCurrentStream() {
+  return playerApi<{
+    data: {
+      active_mode: { slug: string; name: string; descriptor: string | null };
+      active_outcome: { slug: string; name: string } | null;
+      active_window: { id: string; label: string | null; start_time: string; end_time: string; day_of_week: number } | null;
+      resolved_at: string;
+      timezone_used: string;
+      fallback_reason?: string;
+    };
+  }>(`/api/player/current-stream`);
+}
+
 export async function setupDevice(email: string, password: string) {
   const res = await fetch(`${API}/api/player/auth/setup`, {
     method: 'POST',
