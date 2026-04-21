@@ -515,6 +515,8 @@ export function usePlayer() {
       // If user paused manually while we were retrying, stop
       if (el !== getActive() || !el.src || crossfadingRef.current) return;
       if (!el.paused) return; // already resumed (e.g. lock screen controls)
+      // Never auto-resume if the user never explicitly started playback
+      if (!wasPlayingRef.current) return;
 
       console.log('[player] resume attempt', attempt);
       el.play()
@@ -719,6 +721,8 @@ export function usePlayer() {
     if (previousMode === newMode) return;
     activeModeRef.current = newMode;
     setActiveMode(newMode);
+    // Discard any preloaded song from the previous mode so the next fetch uses the new mode
+    preloadedRef.current = null;
     logModeChange(previousMode, newMode).catch((err) => {
       console.error('Failed to log mode change:', err);
     });

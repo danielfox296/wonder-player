@@ -113,7 +113,7 @@ export default function NowPlaying() {
 
         {/* Header */}
         <div style={{ position: 'relative', zIndex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '20px 28px' }}>
-          <img src="/logo.svg" alt="Entuned" style={{ height: 40, opacity: 1 }} />
+          <img src="/logo.svg" alt="Entuned" style={{ height: 66, opacity: 1 }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             {/* Client (eyebrow) + Store (name) stacked — tap to reveal logout */}
             <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
@@ -135,16 +135,6 @@ export default function NowPlaying() {
                     color: 'rgba(255,255,255,0.55)', textTransform: 'uppercase',
                   }}>
                     {storeName}
-                  </span>
-                )}
-                {activeMode && (
-                  <span style={{
-                    fontSize: 9, fontWeight: 500, letterSpacing: 1.8,
-                    color: 'rgba(94,162,182,0.85)', textTransform: 'uppercase',
-                    marginTop: 1,
-                  }}>
-                    Now: {activeMode}
-                    {streamWindowLabel ? ` · ${streamWindowLabel}` : ''}
                   </span>
                 )}
               </div>
@@ -302,6 +292,28 @@ export default function NowPlaying() {
               </FeedbackButton>
             </DarkHalo>
           )}
+        </div>
+
+        {/* Outcome bar — bottom of screen */}
+        <div
+          onClick={() => setShowOutcome(true)}
+          style={{
+            position: 'relative', zIndex: 1,
+            width: '100%',
+            padding: '14px 28px 28px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', userSelect: 'none',
+            background: 'rgba(0,0,0,0.5)',
+            backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+            borderTop: '1px solid rgba(255,255,255,0.06)',
+          }}
+        >
+          <span style={{
+            fontSize: 9, fontWeight: 500, letterSpacing: 2.5,
+            color: 'rgba(94,162,182,0.85)', textTransform: 'uppercase',
+          }}>
+            Outcome · {activeMode}{streamWindowLabel ? ` · ${streamWindowLabel}` : ''}
+          </span>
         </div>
       </div>
 

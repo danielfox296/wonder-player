@@ -53,7 +53,7 @@ export default function OutcomeModal({ activeMode, onSelectMode, onClose }: Outc
           letterSpacing: 2.8, textTransform: 'uppercase',
           marginBottom: 32,
         }}>
-          Outcome Mode
+          Change Outcome
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
@@ -97,7 +97,7 @@ export default function OutcomeModal({ activeMode, onSelectMode, onClose }: Outc
                   color: highlighted ? 'rgba(190,230,245,0.85)' : 'rgba(255,255,255,0.75)',
                   lineHeight: 1.5,
                 }}>
-                  {isQueued ? 'Queued' : m.sublabel}
+                  {isQueued ? 'Takes effect next track' : m.sublabel}
                 </div>
               </button>
             );
